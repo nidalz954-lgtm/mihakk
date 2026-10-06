@@ -8,7 +8,8 @@
 
 ## جرّبه
 
-- النسخة الحية (GitHub Pages): https://nidalz954-lgtm.github.io/mihakk/ (تعمل بعد تفعيل Pages من حساب المالك)
+- النسخة الحية (GitHub Pages): https://nidalz954-lgtm.github.io/mihakk/ (منشورة وتعمل؛ آخر فحص آلي من الخارج 6 أكتوبر 2026)
+- الوثائق: [دليل الاستخدام](docs/USER_GUIDE_AR.md) · [الحدود المعروفة](docs/KNOWN_ISSUES.md) · [الإفصاح عن الذكاء الاصطناعي](docs/AI_DISCLOSURE_AR.md) · [المصادر والحقوق](SOURCE_AND_RIGHTS.md)
 - أو محليًا (Node.js 20.12 أو أحدث، بلا `npm install` وبلا مفاتيح):
 
 ```sh
