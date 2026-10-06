@@ -25,6 +25,7 @@ npm-debug.log*
 
 # Media and archives are not part of the public source
 *.mp4
+!public/media/*.mp4
 *.zip
 *.pptx
 

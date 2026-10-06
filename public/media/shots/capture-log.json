@@ -1,0 +1,32 @@
+{
+  "url": "http://127.0.0.1:3220/",
+  "fixtures": [
+    "02-full-mutated.csv",
+    "reference-full-synthetic.csv"
+  ],
+  "synthetic": true,
+  "religiousText": false,
+  "viewport": "1440x900@2",
+  "hidden": [
+    "assistant launcher",
+    "transient notice"
+  ],
+  "log": [
+    "shot 01-upload",
+    "shot 01b-upload-loaded",
+    "shot 02-setup",
+    "shot 03-queue",
+    "metrics: صفوف الملف 6,237 فُحصت جميع الصفوف حالات المراجعة 8 قد تجتمع حالات في صف واحد أولوية عالية 5 ابدأ بقراءة دليلها أزواج نصية 6,233 مصدر كل زوج ظاهر في الحالة",
+    "element frag-metrics 1132x140",
+    "shot 03b-list",
+    "element frag-list 1120x1036",
+    "opened: النفي موجود في نص وغائب من الآخر — 2:3",
+    "shot 03c-case",
+    "element frag-case 830x828",
+    "element frag-decision 772x366",
+    "shot 04-dossier",
+    "element frag-gate 1128x119",
+    "element frag-export 1128x154",
+    "gate: ! هناك عوائق أو بيانات تحتاج استكمالاً قبل الإحالة 5 حالات معلقة، 1 إشارة تحتاج تصحيحاً وإعادة فحص. هذا ملف متابعة للمختص، وليس شهادة صحة أو إذن نشر."
+  ]
+}

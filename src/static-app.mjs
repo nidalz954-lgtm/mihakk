@@ -37,7 +37,7 @@ export function createStaticHandler({root = publicPath, csp = CSP} = {}) {
         response.writeHead(206, {'Content-Type':type,'Accept-Ranges':'bytes','Content-Range':'bytes ' + start + '-' + end + '/' + bytes.length,'Content-Length':end - start + 1});
         response.end(request.method === 'HEAD' ? undefined : bytes.subarray(start, end + 1)); return;
       }
-      response.writeHead(200, {'Content-Type':type,'Accept-Ranges':'bytes'});
+      response.writeHead(200, {'Content-Type':type,'Content-Length':bytes.length,...(type === 'video/mp4' ? {'Accept-Ranges':'bytes'} : {})});
       response.end(request.method === 'HEAD' ? undefined : bytes);
     } catch { response.writeHead(404); response.end('Not found'); }
   };
