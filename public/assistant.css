@@ -1,0 +1,54 @@
+/* Mihakk guide: floating launcher + chat panel. Brand tokens come from styles.css. */
+.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.guide-launcher{position:fixed;left:22px;bottom:22px;z-index:60;display:flex;align-items:center;gap:10px;padding:9px 18px 9px 10px;border:1px solid #2c3766;border-radius:999px;background:var(--navy,#12183F);color:#fff;font-size:15px;font-weight:600;box-shadow:0 14px 34px #12183f40,inset 0 1px 0 #ffffff1a;transition:transform .18s,box-shadow .18s}
+.guide-launcher:hover{transform:translateY(-2px);box-shadow:0 18px 40px #12183f55,inset 0 1px 0 #ffffff1a}
+.guide-launcher.is-open{background:var(--violet,#6150EA);border-color:#7f70f3}
+.guide-launcher-mark,.guide-avatar{position:relative;display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:linear-gradient(150deg,#6150EA,#3b2fb0);box-shadow:inset 0 1px 0 #ffffff33,0 3px 8px #0a0f2e55;flex-shrink:0}
+.guide-launcher-mark i,.guide-avatar i{width:13px;height:13px;border:2px solid #2EF2C2;transform:rotate(45deg);border-radius:3px}
+.guide-launcher-mark i::after,.guide-avatar i::after{content:"";position:absolute;inset:3px;background:#2EF2C2;border-radius:1px}
+.guide-panel{position:fixed;left:22px;bottom:84px;z-index:61;width:min(400px,calc(100vw - 32px));height:min(600px,calc(100vh - 110px));display:flex;flex-direction:column;background:#fff;border:1px solid var(--line,#DDE3EE);border-radius:18px;box-shadow:0 28px 80px #12183f38;overflow:hidden;animation:guide-in .2s ease-out}
+@keyframes guide-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.guide-head{display:flex;align-items:center;gap:11px;padding:14px 16px;background:var(--navy,#12183F);color:#fff}
+.guide-head h2{font-size:16px;margin:0;line-height:1.4}
+.guide-head p{font-size:11.5px;margin:2px 0 0;color:#aebbd8;line-height:1.4}
+.guide-head>div{flex:1;min-width:0}
+.guide-icon{display:grid;place-items:center;width:36px;height:36px;border:1px solid transparent;border-radius:10px;background:transparent;color:inherit;font-size:24px;line-height:1;flex-shrink:0}
+.guide-icon svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.guide-head .guide-icon{color:#d6ddef}
+.guide-head .guide-icon:hover{background:#ffffff14}
+#guide-speak .wave{opacity:.35}
+#guide-speak[aria-pressed=true]{background:#2EF2C21f;border-color:#2EF2C266;color:#2EF2C2}
+#guide-speak[aria-pressed=true] .wave{opacity:1}
+.guide-log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:var(--canvas,#F2F4FF)}
+.guide-msg{max-width:88%;padding:10px 13px;border-radius:14px;font-size:14.5px;line-height:1.85;overflow-wrap:anywhere}
+.guide-msg p{margin:0}
+.guide-msg.guide{align-self:flex-start;background:#fff;border:1px solid var(--line,#DDE3EE);border-start-start-radius:4px;color:var(--ink,#202B43)}
+.guide-msg.user{align-self:flex-end;background:var(--violet,#6150EA);color:#fff;border-start-end-radius:4px;unicode-bidi:plaintext}
+.guide-msg.system{align-self:stretch;max-width:none;background:var(--warning-soft,#FFF7EA);border:1px solid #ecd9b8;color:var(--warning,#805421);font-size:13px}
+.guide-action{margin-top:9px;padding:6px 12px;border:1px solid #cfc7fa;border-radius:8px;background:var(--violet-soft,#F2EFFF);color:var(--violet-ink,#5140AC);font-size:13px;font-weight:600}
+.guide-action:hover:not(:disabled){background:#e7e2ff}
+.guide-action.plain{background:#fff;border-color:#e2d4bb;color:#805421;font-weight:500}
+.guide-consent{display:flex;flex-wrap:wrap;gap:8px}
+.guide-suggestions{display:flex;flex-wrap:wrap;gap:7px;padding:10px 14px 4px;background:#fff;border-top:1px solid var(--line,#DDE3EE)}
+.guide-chip{padding:5px 11px;border:1px solid #d7d0fa;border-radius:999px;background:#fff;color:var(--violet-ink,#5140AC);font-size:12.5px;line-height:1.6}
+.guide-chip:hover{background:var(--violet-soft,#F2EFFF)}
+.guide-form{display:flex;align-items:center;gap:7px;padding:10px 14px;background:#fff}
+.guide-form input{flex:1;min-width:0;height:44px;padding:8px 13px;border:1px solid #d5deeb;border-radius:11px;font-size:15px;color:var(--ink,#202B43);background:#fff}
+.guide-form input:focus{outline:0;border-color:var(--violet,#6150EA);box-shadow:0 0 0 3px #6150ea1f}
+.guide-mic{width:44px;height:44px;border-color:#d5deeb;color:var(--violet-ink,#5140AC);background:#fff}
+.guide-mic:hover{background:var(--violet-soft,#F2EFFF)}
+.guide-mic.is-listening{background:#C8323A;border-color:#C8323A;color:#fff;animation:guide-pulse 1.3s ease-in-out infinite}
+@keyframes guide-pulse{0%,100%{box-shadow:0 0 0 0 #c8323a55}50%{box-shadow:0 0 0 7px #c8323a00}}
+.guide-send{height:44px;padding:0 16px;border:0;border-radius:11px;background:var(--violet,#6150EA);color:#fff;font-size:14px;font-weight:600}
+.guide-send:hover{background:#5140cf}
+.guide-foot{margin:0;padding:0 14px 11px;background:#fff;font-size:11.5px;color:var(--muted,#526079);line-height:1.6}
+@media(max-width:560px){
+  .guide-launcher{left:16px;bottom:16px}
+  .guide-panel{left:8px;right:8px;bottom:8px;width:auto;height:calc(100dvh - 16px)}
+  .guide-launcher.is-open{display:none}
+}
+@media(prefers-reduced-motion:reduce){.guide-panel,.guide-mic.is-listening{animation:none}.guide-launcher{transition:none}}
+@media print{.guide-launcher,.guide-panel{display:none!important}}
+/* With the smart employee widget on, lift the guide button above it so neither covers the other. */
+.guide-agent-on .guide-launcher{bottom:150px}
+@media(min-width:561px){.guide-agent-on .guide-panel{bottom:212px;height:min(520px,calc(100vh - 232px))}}

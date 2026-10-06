@@ -1,0 +1,8 @@
+Readex Pro, unmodified variable TrueType font.
+Fetched 2026-10-04 from Google Fonts repository:
+https://raw.githubusercontent.com/google/fonts/main/ofl/readexpro/ReadexPro%5BHEXP%2Cwght%5D.ttf
+License source:
+https://raw.githubusercontent.com/google/fonts/main/ofl/readexpro/OFL.txt
+Local SHA256: 268bba7e1e8f3b14d798b3fb0e40ebaa3fc39308c9ac0020e2faf6df181cc30e
+Full original copyright and SIL OFL 1.1: OFL-Readex-Pro.txt.
+Not covered by application's MIT license. No runtime Google font request.

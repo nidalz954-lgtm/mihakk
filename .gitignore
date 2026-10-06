@@ -1,0 +1,35 @@
+# Build output (GitHub Actions builds dist/ itself)
+/dist/
+/build/
+node_modules/
+/coverage/
+*.log
+npm-debug.log*
+
+# Local secrets and configuration: never commit
+.env
+.env.*
+*.pem
+*.key
+
+# Local QA output and private material: never commit.
+# Root-anchored on purpose: public/data/ (approved Quran display text) MUST be committed.
+/public/qa-tmp/
+/outputs/
+/data/
+/private/
+/sources/
+/video-studio/
+/release/
+/07-verification/
+
+# Media and archives are not part of the public source
+*.mp4
+*.zip
+*.pptx
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

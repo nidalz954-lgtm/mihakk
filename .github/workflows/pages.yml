@@ -1,0 +1,67 @@
+# Test, build and deploy the static browser app to GitHub Pages.
+# The project has zero npm dependencies: no `npm install` / `npm ci` step is needed.
+# Pages source must be set to "GitHub Actions" (Settings -> Pages -> Build and deployment).
+name: Test, build and deploy (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'  # the version every local test run used (v24.14.0); engines still allow >=20.12
+
+      - name: Show versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Test (no npm install needed)
+        run: npm test
+
+      - name: Build static site into dist/
+        run: npm run build
+
+      - name: Check build version matches package.json
+        run: |
+          node -e "const p=require('./package.json');const b=require('./dist/build-info.json');if(p.version!==b.version){console.error('version mismatch',p.version,b.version);process.exit(1)}console.log('build-info version',b.version)"
+
+      - name: Disable Jekyll processing (harmless with Actions deploys)
+        run: touch dist/.nojekyll
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload dist/ as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
