@@ -1,9 +1,163 @@
 <!doctype html>
 <html lang="ar" dir="rtl">
-<head><meta charset="utf-8" /><meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src 'self' https://api.quranpedia.net https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="theme-color" content="#12183F" /><meta name="description" content="مِحَكّ: مساحة مراجعة ترجمة معاني القرآن قبل النشر. ملف كامل، قائمة حالات موثقة، وقرار بشري قابل للتتبع." /><meta name="mihakk-version" content="0.4.2" /><title>مِحَكّ | نظام فرز مخاطر ترجمات معاني القرآن</title><link rel="icon" href="assets/mihakk-logo-dark.png" /><link rel="stylesheet" href="styles.css" /><link rel="stylesheet" href="assistant.css" /><script type="module" src="app.js"></script><script type="module" src="modules/assistant-ui.mjs"></script></head>
-<body>
-  <a class="skip-link" href="#workspace">انتقل إلى مساحة العمل</a>
-  <header class="app-header"><a class="brand" href="#workspace"><img src="assets/mihakk-logo-dark.png" width="166" height="60" alt="مِحَكّ — مدقق ترجمات معاني القرآن الكريم" /></a><span class="header-purpose">نظام فرز مخاطر ترجمات معاني القرآن</span><div class="header-actions"><span class="local-note"><i aria-hidden="true"></i> معالجة الملف داخل المتصفح</span><button id="new-audit" type="button" class="text-button light" hidden>فحص جديد</button></div></header>
+<head><meta charset="utf-8" /><meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src 'self' https://api.quranpedia.net https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'self'" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="theme-color" content="#12183F" /><meta name="description" content="مِحَكّ: مساحة مراجعة ترجمة معاني القرآن قبل النشر. ملف كامل، قائمة حالات موثقة، وقرار بشري قابل للتتبع." /><meta name="mihakk-version" content="0.4.2" /><title>مِحَكّ | نظام فرز مخاطر ترجمات معاني القرآن</title><link rel="icon" href="assets/mihakk-logo-dark.png" /><link rel="stylesheet" href="styles.css" /><link rel="stylesheet" href="assistant.css" /><link rel="stylesheet" href="site.css" /><script type="module" src="app.js"></script><script type="module" src="site.js"></script><script type="module" src="modules/assistant-ui.mjs"></script></head>
+<body data-view="landing">
+  <a class="skip-link" href="#top" data-skip>انتقل إلى المحتوى الرئيسي</a>
+<div id="landing" class="landing" data-landing>
+  <div class="scroll-progress" aria-hidden="true"><i></i></div>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="site-brand" href="#top" aria-label="مِحَكّ — الصفحة الرئيسية"><img src="assets/mihakk-logo-light.png" width="150" height="56" alt="مِحَكّ — مدقق ترجمات معاني القرآن الكريم" /></a>
+      <nav class="site-nav" aria-label="أقسام الصفحة">
+        <a href="#how">كيف تعمل</a><a href="#case">شكل الحالة</a><a href="#video">الفيديو</a><a href="#judges">مسار التحكيم</a><a href="#limits">الحدود</a>
+      </nav>
+      <a class="btn btn-primary btn-sm" href="#tool" data-open-tool>ابدأ الفحص <span aria-hidden="true">←</span></a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-bg" aria-hidden="true"></div>
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="dot" aria-hidden="true"></span>مساعد مراجعة قبل الاعتماد العلمي</p>
+          <h1 id="hero-title">ارفع الترجمة،<br /><em>وابدأ من المواضع</em> التي تحتاج نظرك.</h1>
+          <p class="lead">مِحَكّ يفحص ملف ترجمة معاني القرآن الكريم كاملاً، ويجمع لك قائمة حالات بالدليل والمصدر، ثم يوثّق قرارك كمراجع. لا يترجم، ولا يُفتي، ولا يمنح اعتماداً.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary btn-lg" href="#tool" data-open-tool>ابدأ فحص ملف <span aria-hidden="true">←</span></a>
+            <a class="btn btn-ghost btn-lg" href="#tool" data-open-tool data-start-demo>جرّب مثالاً جاهزاً <span aria-hidden="true">▷</span></a>
+          </div>
+          <ul class="trust-row" aria-label="ضمانات أساسية">
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.500-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>الملف يبقى في متصفحك</li>
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.500"/><path d="M5 20c0-4 3-6 7-6s7 2 7 6"/></svg>بلا حساب ولا مفتاح</li>
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>الدليل ظاهر والقرار لك</li>
+          </ul>
+        </div>
+
+        <div class="hero-scene" aria-hidden="true" data-tilt>
+          <div class="scene-3d">
+            <div class="plate plate-grid"><svg viewBox="0 0 400 400"><g class="girih"><rect x="60" y="60" width="280" height="280" rx="6"/><rect x="60" y="60" width="280" height="280" rx="6" transform="rotate(22.500 200 200)"/><rect x="60" y="60" width="280" height="280" rx="6" transform="rotate(45 200 200)"/><rect x="60" y="60" width="280" height="280" rx="6" transform="rotate(67.500 200 200)"/><circle cx="200" cy="200" r="148"/><circle cx="200" cy="200" r="96"/></g></svg></div>
+            <div class="plate plate-star"><svg viewBox="0 0 400 400"><defs><linearGradient id="vg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7B6CF5"/><stop offset="1" stop-color="#4A39C9"/></linearGradient></defs><g class="khatam"><rect x="95" y="95" width="210" height="210" rx="14" fill="url(#vg)" opacity=".92"/><rect x="95" y="95" width="210" height="210" rx="14" transform="rotate(45 200 200)" fill="none" stroke="#12183F" stroke-width="16" stroke-linejoin="round"/><circle cx="200" cy="200" r="20" fill="#12183F"/></g></svg></div>
+            <div class="plate plate-card">
+              <div class="mini-card">
+                <div class="mini-head"><span class="mini-file"><i></i>translation-draft.csv</span><span class="mini-state"><b class="state-scan">يجري الفحص…</b><b class="state-done">٣ مواضع تحتاج نظرك</b></span></div>
+                <div class="mini-rows">
+                  <div class="mini-row"><span class="ref">١:١</span><span class="bar w80"></span><span class="tag ok">سليم</span></div>
+                  <div class="mini-row r-flag f1"><span class="ref">١:٣</span><span class="bar w60"></span><span class="tag hi">آية ناقصة</span></div>
+                  <div class="mini-row"><span class="ref">٢:١</span><span class="bar w90"></span><span class="tag ok">سليم</span></div>
+                  <div class="mini-row r-flag f2"><span class="ref">٢:٢</span><span class="bar w70"></span><span class="tag md">تكرار</span></div>
+                  <div class="mini-row"><span class="ref">٢:٣</span><span class="bar w50"></span><span class="tag ok">سليم</span></div>
+                  <div class="mini-row r-flag f3"><span class="ref">٢:٤</span><span class="bar w85"></span><span class="tag hi">اختلاف نفي</span></div>
+                  <i class="scan-line"></i>
+                </div>
+                <p class="mini-note">مثال توضيحي — بيانات اصطناعية</p>
+              </div>
+            </div>
+            <span class="chip chip-a">دليل ومصدر</span>
+            <span class="chip chip-b">قرار المراجع</span>
+          </div>
+        </div>
+      </div>
+      <a class="scroll-cue" href="#how" aria-label="انزل لمعرفة كيف تعمل"><span></span></a>
+    </section>
+
+    <section class="stats" aria-label="أرقام أساسية">
+      <div class="wrap stats-grid">
+        <div class="stat reveal"><strong data-count="6236">6236</strong><span>آية في فهرس النطاق الكامل</span></div>
+        <div class="stat reveal"><strong data-count="114">114</strong><span>سورة تُفحص تغطيتها</span></div>
+        <div class="stat reveal"><strong data-count="4">4</strong><span>خطوات واضحة من الملف إلى المتابعة</span></div>
+        <div class="stat reveal"><strong class="stat-text">محلي</strong><span>الفحص داخل المتصفح، دون رفع الملف لخادم</span></div>
+      </div>
+    </section>
+
+    <section id="how" class="section" aria-labelledby="how-title">
+      <div class="wrap">
+        <header class="section-head reveal"><p class="eyebrow">المسار</p><h2 id="how-title">أربع خطوات، من الملف إلى ملف المتابعة.</h2><p>كل خطوة تُنجز شيئاً واحداً، وتبقى حدودها ظاهرة في النتيجة.</p></header>
+        <ol class="steps">
+          <li class="step reveal" style="--i:0"><span class="step-no">١</span><div class="step-art" aria-hidden="true"><svg viewBox="0 0 120 90"><rect x="30" y="14" width="60" height="62" rx="8"/><path d="M60 58V34M50 44l10-10 10 10"/><path d="M42 68h36" /></svg></div><h3>ملف الترجمة</h3><p>ارفع CSV أو Excel أو XML، وراجع أول الصفوف قبل المتابعة. حتى 25 ميغابايت.</p></li>
+          <li class="step reveal" style="--i:1"><span class="step-no">٢</span><div class="step-art" aria-hidden="true"><svg viewBox="0 0 120 90"><rect x="16" y="22" width="40" height="46" rx="7"/><rect x="64" y="22" width="40" height="46" rx="7"/><path d="M24 36h24M24 46h18M72 36h24M72 46h18"/></svg></div><h3>النطاق والمرجع</h3><p>حدّد هل الملف كامل أم جزئي، واختر مرجعاً للمقارنة أو افحص البنية فقط.</p></li>
+          <li class="step reveal" style="--i:2"><span class="step-no">٣</span><div class="step-art" aria-hidden="true"><svg viewBox="0 0 120 90"><rect x="22" y="14" width="76" height="16" rx="6"/><rect x="22" y="37" width="76" height="16" rx="6" class="hot"/><rect x="22" y="60" width="76" height="16" rx="6"/><circle cx="32" cy="45" r="3.500" class="fill"/></svg></div><h3>قائمة المراجعة</h3><p>حالات مرتبة بالأولوية. افتح الحالة، اقرأ النصين والدليل، ثم سجّل قرارك مع السبب.</p></li>
+          <li class="step reveal" style="--i:3"><span class="step-no">٤</span><div class="step-art" aria-hidden="true"><svg viewBox="0 0 120 90"><path d="M30 80V40l30-22 30 22v40"/><path d="M45 80V52h30v28"/><path d="M60 18V8"/></svg></div><h3>ملف المتابعة</h3><p>سجل بما بقي مفتوحاً قبل الإحالة للجهة العلمية، مع تصدير JSON وCSV وطباعة.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="case" class="section section-tint" aria-labelledby="case-title">
+      <div class="wrap case-grid">
+        <div class="case-copy reveal">
+          <p class="eyebrow">داخل الأداة</p>
+          <h2 id="case-title">كل حالة تُعرض بدليلها، لا بحكم جاهز.</h2>
+          <ul class="check-list">
+            <li><b>النصان جنباً إلى جنب</b> — ترجمتك والنص المرجعي المقابل.</li>
+            <li><b>سبب التنبيه</b> — مثل غياب النفي في أحد النصين.</li>
+            <li><b>المصدر وسلسلة الدليل</b> — من أين جاء النص وكيف قُرئ.</li>
+            <li><b>قرارك مع السبب</b> — يُحفظ ويُربط ببصمة الدليل.</li>
+          </ul>
+          <p class="fine">جرّب الأزرار في البطاقة. المثال اصطناعي وليس آية ولا ترجمة قرآنية.</p>
+        </div>
+        <article class="case-card reveal" data-case aria-label="مثال لحالة مراجعة (اصطناعي)">
+          <div class="case-top"><span class="pill pill-hi">أولوية عالية</span><span class="case-ref">٢:٣</span><span class="case-tag">مثال اصطناعي</span></div>
+          <h3>النفي موجود في نص وغائب من الآخر</h3>
+          <p class="case-why">احتمال وجود أداة نفي في أحد النصين. راجع السياق والمعنى مع الدليل.</p>
+          <div class="case-pair">
+            <figure><figcaption>ترجمتك</figcaption><blockquote dir="ltr" lang="en">SYNTHETIC TRAINING TEXT. The museum is open on Monday.</blockquote></figure>
+            <figure><figcaption>النص المرجعي المقابل</figcaption><blockquote dir="ltr" lang="en">SYNTHETIC TRAINING TEXT. The museum is <mark>not</mark> open on Monday.</blockquote></figure>
+          </div>
+          <div class="case-decide" role="group" aria-label="قرار المراجع (توضيحي)">
+            <button type="button" data-choice="تحتاج تصحيحاً">تحتاج تصحيحاً</button>
+            <button type="button" data-choice="إغلاق التنبيه مع سبب">إغلاق مع سبب</button>
+            <button type="button" data-choice="إحالة لمتخصص">إحالة لمتخصص</button>
+          </div>
+          <p class="case-state" role="status" aria-live="polite">اختر قراراً لترى كيف يُسجَّل.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="video" class="section stage" aria-labelledby="video-title">
+      <div class="stage-bg" aria-hidden="true"></div>
+      <div class="wrap">
+        <header class="section-head reveal on-dark"><p class="eyebrow">شاهد</p><h2 id="video-title">المسار كاملاً في دقيقتين.</h2><p>من رفع الملف إلى ملف المتابعة، بلقطات من الأداة نفسها.</p></header>
+        <div class="video-frame reveal">
+          <video id="demo-video" controls preload="none" playsinline poster="media/mihakk-motion-poster.jpg" aria-describedby="video-note"><source src="media/mihakk-motion-web.mp4" type="video/mp4" />متصفحك لا يدعم تشغيل الفيديو.</video>
+          <button type="button" class="video-play" id="video-play" aria-label="تشغيل الفيديو"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.500v13l11-6.500z"/></svg></button>
+        </div>
+        <p id="video-note" class="video-note">التعليق الصوتي بصوت مولَّد بالذكاء الاصطناعي، والنصوص في اللقطات اصطناعية للاختبار.</p>
+      </div>
+    </section>
+
+    <section id="judges" class="section" aria-labelledby="judges-title">
+      <div class="wrap">
+        <header class="section-head reveal"><p class="eyebrow">للجنة التحكيم</p><h2 id="judges-title">جرّبها بنفسك في خمس دقائق.</h2><p>لا حساب ولا تثبيت. افتح الأداة واتبع هذه الخطوات.</p></header>
+        <ol class="judge-steps">
+          <li class="reveal" style="--i:0"><span class="step-no">١</span><div><h3>المثال التعليمي</h3><p>ملف صغير فيه نقص وتكرار واختلاف نفي. يفتح لك المسار كاملاً بنقرة.</p><a class="btn btn-primary btn-sm" href="#tool" data-open-tool data-start-demo>شغّل المثال <span aria-hidden="true">▷</span></a></div></li>
+          <li class="reveal" style="--i:1"><span class="step-no">٢</span><div><h3>ملف كامل بـ 6,236 صفاً</h3><p>نزّل الملفين، وارفع الأول كملف الترجمة، والثاني كمرجع في الخطوة الثانية.</p><div class="dl-row"><a class="btn btn-ghost btn-sm" href="samples/sample-with-errors.csv" download>ترجمة فيها أخطاء <span aria-hidden="true">↓</span></a><a class="btn btn-ghost btn-sm" href="samples/sample-reference.csv" download>ملف المرجع <span aria-hidden="true">↓</span></a><a class="btn btn-ghost btn-sm" href="samples/sample-clean.csv" download>ترجمة سليمة <span aria-hidden="true">↓</span></a></div></div></li>
+          <li class="reveal" style="--i:2"><span class="step-no">٣</span><div><h3>قرار وتصدير</h3><p>افتح حالة، سجّل قراراً مع سبب، ثم انتقل لملف المتابعة وصدّره JSON أو CSV.</p><a class="btn btn-ghost btn-sm" href="#tool" data-open-tool>افتح الأداة <span aria-hidden="true">←</span></a></div></li>
+        </ol>
+        <p class="fine center reveal">الملفات التجريبية نصوص إنجليزية مؤلفة، وليست آيات ولا ترجمة قرآنية، ولا تقيس دقة الأداة.</p>
+      </div>
+    </section>
+
+    <section id="limits" class="section section-tint" aria-labelledby="limits-title">
+      <div class="wrap">
+        <header class="section-head reveal"><p class="eyebrow">بوضوح</p><h2 id="limits-title">ما تفعله الأداة وما لا تفعله.</h2></header>
+        <div class="limits-grid">
+          <div class="limit-card yes reveal"><h3><span class="mark" aria-hidden="true">✓</span>تفعل</h3><ul><li>تكشف النقص والتكرار والفراغ وخطأ الترقيم دون ذكاء اصطناعي.</li><li>تقارن بمرجع تحدده أنت، وتعرض مصدره وحدوده.</li><li>ترتّب الحالات بالأولوية وتعرض الدليل.</li><li>تحفظ قرارك وسببه، وتصدّر ملف متابعة.</li></ul></div>
+          <div class="limit-card no reveal"><h3><span class="mark" aria-hidden="true">✕</span>لا تفعل</h3><ul><li>لا تترجم ولا تولّد نصاً.</li><li>لا تُفتي ولا تحكم على صحة المعنى.</li><li>لا تمنح شهادة اعتماد ولا إذن نشر.</li><li>المؤشر النموذجي تجريبي، وليس درجة صحة.</li></ul></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta-band" aria-labelledby="cta-title">
+      <div class="wrap cta-inner reveal"><div><h2 id="cta-title">جاهز لفحص ملفك؟</h2><p>ابدأ بملفك، أو جرّب المثال أولاً لترى المسار.</p></div><div class="hero-actions"><a class="btn btn-light btn-lg" href="#tool" data-open-tool>ابدأ فحص ملف <span aria-hidden="true">←</span></a><a class="btn btn-outline-light btn-lg" href="#tool" data-open-tool data-start-demo>جرّب المثال</a></div></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner"><img src="assets/mihakk-logo-light.png" width="120" height="45" alt="مِحَكّ" /><p>أداة مساعدة للمراجعة، وليست جهة اعتماد أو إفتاء. القرار العلمي للجهة المتخصصة.</p><span class="ver" dir="ltr">v0.4.2</span></div>
+  </footer>
+</div>
+
+  <header class="app-header"><a class="brand" href="#top" title="الصفحة الرئيسية"><img src="assets/mihakk-logo-light.png" width="150" height="56" alt="مِحَكّ — مدقق ترجمات معاني القرآن الكريم" /></a><span class="header-purpose">نظام فرز مخاطر ترجمات معاني القرآن</span><div class="header-actions"><a class="home-link" href="#top">← الصفحة الرئيسية</a><span class="local-note"><i aria-hidden="true"></i> معالجة الملف داخل المتصفح</span><button id="new-audit" type="button" class="text-button light" hidden>فحص جديد</button></div></header>
   <div class="app-frame">
     <aside class="workflow-rail" aria-label="مسار العمل">
       <p class="rail-kicker">ملف واحد. مسار واضح.</p>
