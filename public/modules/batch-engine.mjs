@@ -860,7 +860,9 @@ function compareLexically(row, language, addFinding) {
           ...evidence, countOnly: true,
           candidateNegations: candidateNegations.map((token) => token.text), referenceNegations: referenceNegations.map((token) => token.text),
           candidateNegationCount: candidateNegations.length, referenceNegationCount: referenceNegations.length,
-          addedNegations: added.map((token) => token.text), removedNegations: removed.map((token) => token.text),
+          // Only candidate-side fragments are listed as text; reference-side fragments stay in spans and referenceNegations,
+          // which the live-reference export redaction already strips.
+          addedNegations: added.map((token) => token.text), addedNegationCount: added.length, removedNegationCount: removed.length,
           supportedMarkerLanguage: language || 'en (undeclared language)',
         },
       }, [row]);

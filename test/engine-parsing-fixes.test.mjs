@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { auditBatch } from '../src/batch-engine.mjs';
 import { readFile } from 'node:fs/promises';
 import { getEligibleContextRows } from '../public/modules/context-risk.mjs';
+import { redactLiveReferenceText } from '../public/modules/export-redaction.mjs';
 
 // Engine and parsing fixes from the 2026-10-07 live check (BUG-06, BUG-02, BUG-07, BUG-08, BUG-33, BUG-34, BUG-32).
 // All texts are authored NONRELIGIOUS sentences; they are not Quran translations.
@@ -36,8 +37,10 @@ test('BUG-06: one marker fewer in the candidate is a medium count-only signal wi
   assert.equal(finding.evidence.countOnly, true);
   assert.equal(finding.evidence.candidateNegationCount, 1);
   assert.equal(finding.evidence.referenceNegationCount, 2);
-  assert.deepEqual(finding.evidence.removedNegations, ['not']);
+  assert.equal(finding.evidence.removedNegationCount, 1);
+  assert.equal(finding.evidence.addedNegationCount, 0);
   assert.deepEqual(finding.evidence.addedNegations, []);
+  assert.equal('removedNegations' in finding.evidence, false, 'reference-side text is never listed outside redacted keys');
   assert.equal(finding.spans.length, 1);
   const [span] = finding.spans;
   assert.equal(span.role, 'reference');
@@ -72,6 +75,20 @@ test('BUG-06: Arabic negation counts are compared too', () => {
   assert.equal(finding.evidence.candidateNegationCount, 1);
   assert.equal(finding.evidence.referenceNegationCount, 2);
   assert.equal(reference.slice(finding.spans[0].start, finding.spans[0].end), 'ولا');
+});
+
+test('BUG-06: live-reference export redaction removes every reference-side fragment of the count evidence', () => {
+  const report = auditBatch({
+    rows: [{ surah: 112, ayah: 1, translation: 'The clerk neither opens the door and closes the window.' }],
+    referenceRows: [{ surah: 112, ayah: 1, translation: 'The clerk neither opens the door nor closes the window.' }],
+    scope: { type: 'provided' },
+    metadata: { candidate: { language: 'en' }, reference: { title: 'Live', edition: 'x', verificationStatus: 'verified', language: 'en', sourceKind: 'quranpedia-api' } },
+  });
+  assert.ok(report.findings.some((finding) => finding.code === 'potential_negation_count_change'));
+  const exported = JSON.stringify(redactLiveReferenceText(report));
+  assert.equal(exported.includes('"nor"'), false);
+  assert.equal(exported.includes('nor closes'), false);
+  assert.ok(exported.includes('potential_negation_count_change'));
 });
 
 test('BUG-06: presence differences keep their original high-priority code and shape', () => {
