@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { auditBatch } from '../src/batch-engine.mjs';
 import { readFile } from 'node:fs/promises';
+import { createHash, webcrypto } from 'node:crypto';
+import { createReferenceClient } from '../public/modules/reference-api.mjs';
 import { getEligibleContextRows } from '../public/modules/context-risk.mjs';
 import { redactLiveReferenceText } from '../public/modules/export-redaction.mjs';
 
@@ -183,4 +185,76 @@ test('BUG-02: the report stays additive (same schema version, no field removed)'
   assert.equal(report.schemaVersion, 'mihakk-batch/1');
   for (const key of ['totalRows', 'comparedRows', 'lexicalComparedRows', 'abstainRows', 'noSignalRows', 'needsReviewRows', 'qualifierAbstainRows', 'numericAbstainRows', 'certification']) assert.ok(key in report.summary, key);
   assert.equal(report.summary.certification, 'none');
+});
+
+// ---------------------------------------------------------------- BUG-07
+// Synthetic response shapes only (no copyrighted translation text): leading verse numbers and note anchors.
+const timestamp = '2026-10-07T00:00:00.000Z';
+const jsonResponse = (data) => new Response(JSON.stringify(data), { status: 200 });
+async function fetchShapes(items, { surah = 2, rows } = {}) {
+  const client = createReferenceClient({
+    fetchImpl: async () => jsonResponse(items), cryptoImpl: webcrypto, now: () => new Date(timestamp), delay: async () => {},
+  });
+  return client.fetchReferenceForRows({ book: { id: 1948, title: 'Synthetic shape book', language: 'en' }, rows: rows ?? items.map((item) => ({ surah, ayah: item.ayah_number })) });
+}
+
+test('BUG-07: a leading "N." verse number is removed, raw and normalised hashes are both recorded', async () => {
+  const raw = '3. The clerk opens the door.';
+  const result = await fetchShapes([{ ayah_number: 3, translation_text: raw }]);
+  const [row] = result.rows;
+  assert.equal(row.translation, 'The clerk opens the door.');
+  assert.equal(row.rawSha256, createHash('sha256').update(raw).digest('hex'), 'raw hash covers the retrieved text unchanged');
+  assert.equal(row.normalizedSha256, createHash('sha256').update('The clerk opens the door.').digest('hex'));
+  assert.notEqual(row.rawSha256, row.normalizedSha256);
+  assert.deepEqual(row.normalization, { versePrefixRemoved: true, noteAnchorsRemoved: 0 });
+  assert.equal(result.metadata.normalization.versePrefixRows, 1);
+  assert.equal(result.metadata.retention, 'session-memory-only');
+});
+
+test('BUG-07: "(S:A)" and "[S:A]" prefixes and numeric <sup> anchors are removed; letter text in <sup> is kept', async () => {
+  const result = await fetchShapes([
+    { ayah_number: 3, translation_text: "<div class='t'><span>(2:3)</span> The clerk<sup>1</sup> opens the door<sup>2</sup>.</div><div class='foot-notes'>1. A note. 2. Another note.</div>" },
+    { ayah_number: 4, translation_text: '<div><span>[2:4]</span> The clerk closes the window.</div>' },
+    { ayah_number: 5, translation_text: '<div>On the 5<sup>th</sup> day the clerk rests.</div>' },
+  ]);
+  const byAyah = Object.fromEntries(result.rows.map((row) => [row.ayah, row]));
+  assert.equal(byAyah[3].translation, 'The clerk opens the door.');
+  assert.equal(/[0-9]/.test(byAyah[3].translation), false);
+  assert.deepEqual(byAyah[3].footnotes, ['1. A note. 2. Another note.']);
+  assert.deepEqual(byAyah[3].normalization, { versePrefixRemoved: true, noteAnchorsRemoved: 2 });
+  assert.equal(byAyah[4].translation, 'The clerk closes the window.');
+  assert.match(byAyah[5].translation, /5\s?th day/);
+  assert.equal(byAyah[5].normalization.noteAnchorsRemoved, 0);
+  assert.equal(result.metadata.normalization.versePrefixRows, 2);
+  assert.equal(result.metadata.normalization.noteAnchorsRemoved, 2);
+});
+
+test('BUG-07: only the requested verse number is removed; decimals and other numbers stay', async () => {
+  const result = await fetchShapes([
+    { ayah_number: 2, translation_text: '2.5 litres of water remain.' },
+    { ayah_number: 5, translation_text: '3. The clerk waits.' },
+    { ayah_number: 6, translation_text: '(2:9) The clerk waits.' },
+    { ayah_number: 7, translation_text: 'The clerk waits 7. times' },
+  ]);
+  const byAyah = Object.fromEntries(result.rows.map((row) => [row.ayah, row]));
+  assert.equal(byAyah[2].translation, '2.5 litres of water remain.');
+  assert.equal(byAyah[5].translation, '3. The clerk waits.');
+  assert.equal(byAyah[6].translation, '(2:9) The clerk waits.');
+  assert.equal(byAyah[7].translation, 'The clerk waits 7. times');
+  assert.equal(result.metadata.normalization.versePrefixRows, 0);
+});
+
+test('BUG-07: prefixed live references no longer make every row a numeric change, and real numeric changes still show', async () => {
+  const ayat = [1, 2, 3, 4, 5, 6];
+  const bodies = ['The clerk opens the door.', 'The clerk closes the window.', 'The clerk reads the page.', 'The clerk writes the note.', 'The clerk carries the box.', 'The clerk counts three chairs.'];
+  const result = await fetchShapes(ayat.map((ayah, index) => ({ ayah_number: ayah, translation_text: `${ayah}. ${bodies[index]}` })));
+  const report = auditBatch({
+    rows: ayat.map((ayah, index) => ({ surah: 2, ayah, translation: index === 5 ? 'The clerk counts five chairs.' : bodies[index] })),
+    referenceRows: result.rows,
+    scope: { type: 'provided' },
+    metadata: { candidate: { language: 'en' }, reference: { ...result.metadata, language: 'en' } },
+  });
+  const numeric = report.findings.filter((finding) => finding.code === 'potential_numeric_change');
+  assert.equal(numeric.length, 1, 'only the genuinely changed number is flagged');
+  assert.deepEqual(numeric[0].verseIds, ['2:6']);
 });
