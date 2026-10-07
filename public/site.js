@@ -15,7 +15,9 @@ function hashTarget() {
   try { id = decodeURIComponent(location.hash.slice(1)); } catch { id = ''; }
   return id && id !== 'top' ? doc.getElementById(id) : null;
 }
+let firstRoute = true;
 function route() {
+  const first = firstRoute; firstRoute = false;
   const tool = isTool(), changed = currentView !== null && currentView !== (tool ? 'tool' : 'landing');
   currentView = tool ? 'tool' : 'landing';
   doc.body.dataset.view = currentView;
@@ -31,7 +33,7 @@ function route() {
   const dialog = $('#finding-dialog');
   if (dialog?.open) dialog.close();
   const target = hashTarget();
-  if (target) target.scrollIntoView({behavior: changed || reduceMotion ? 'instant' : 'smooth', block: 'start'});
+  if (target) target.scrollIntoView({behavior: changed || reduceMotion || first ? 'instant' : 'smooth', block: 'start'});
   else if (changed) scrollTo({top: 0, behavior: 'instant'});
   if (changed && !target) $('#top')?.focus({preventScroll: true});
 }
@@ -130,6 +132,27 @@ if (story && !reduceMotion) {
   }));
 }
 
+// ---------- tool: keep the status / error banner (#notice) out from under the sticky app header ----------
+// The app scrolls to the step heading, which sits BELOW the banner, so a fresh message can end up behind the header.
+// Publish the header height for CSS, and after a message changes and the page has stopped moving, bring the banner
+// into view only if it is covered AND within one screen above the viewport (never yank a reader who is far down the list).
+const appHeader = $('.app-header'), noticeBox = $('#notice');
+if (appHeader && noticeBox) {
+  const publishHeader = () => { const h = appHeader.offsetHeight; if (h > 0) doc.documentElement.style.setProperty('--app-header-h', h + 'px'); };
+  if ('ResizeObserver' in window) new ResizeObserver(publishHeader).observe(appHeader); else addEventListener('resize', publishHeader);
+  publishHeader();
+  let revealTimer = 0;
+  const reveal = () => {
+    revealTimer = 0;
+    if (doc.body.dataset.view !== 'tool' || noticeBox.hidden || $('#finding-dialog')?.open) return;
+    const cover = appHeader.getBoundingClientRect().bottom, box = noticeBox.getBoundingClientRect();
+    if (box.top < cover && box.bottom > -innerHeight) noticeBox.scrollIntoView({behavior: 'instant', block: 'start'});
+  };
+  const settle = () => { clearTimeout(revealTimer); revealTimer = setTimeout(reveal, 220); };
+  new MutationObserver(settle).observe(noticeBox, {childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class']});
+  addEventListener('scroll', () => { if (revealTimer) settle(); }, {passive: true});
+}
+
 // ---------- case visual: gentle pointer tilt ----------
 const caseVisual = $('[data-tilt-card]');
 if (caseVisual && !reduceMotion && matchMedia('(pointer: fine)').matches) {
@@ -177,6 +200,14 @@ if (frame) {
     full.play().catch(() => {});
   });
 }
+
+// Cold deep link: route() ran before the pinned story (340vh, added above) existed, so the first scroll aimed at the pre-story
+// layout. Re-aim once now that the layout is final, and once more after load, unless the reader has already moved the page.
+let readerMoved = false;
+['wheel', 'touchstart', 'keydown', 'pointerdown'].forEach(name => addEventListener(name, () => { readerMoved = true; }, {once: true, passive: true}));
+const settleHash = () => { if (readerMoved || isTool()) return; hashTarget()?.scrollIntoView({behavior: 'instant', block: 'start'}); };
+settleHash();
+addEventListener('load', settleHash, {once: true});
 
 // First paint of scroll-linked values, and again whenever the landing view comes back.
 onScroll();

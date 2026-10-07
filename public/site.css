@@ -12,6 +12,9 @@
   --app-header:76px;
 }
 html{scroll-padding-top:84px}
+/* F2: site.js publishes the real header height (it wraps to 2 rows on phones); the tool uses it for every scroll target so the #notice banner is not parked under the sticky header */
+html:has(body[data-view="tool"]){scroll-padding-top:calc(var(--app-header-h,76px) + 8px)}
+#notice{scroll-margin-top:calc(var(--app-header-h,76px) + 8px)}
 body{background:var(--bg);color:var(--text)}
 body[data-view="landing"] .app-header,body[data-view="landing"] .app-frame,body[data-view="landing"] #finding-dialog:not([open]){display:none!important}
 body[data-view="tool"] #landing{display:none!important}
@@ -35,7 +38,7 @@ body[data-view="tool"] #landing{display:none!important}
 .btn-sm{min-height:44px;padding:8px 18px;font-size:15px}
 .btn-lg{min-height:54px;padding:12px 28px;font-size:17px}
 .btn:focus-visible,.site-nav a:focus-visible,.site-brand:focus-visible,.story-item:focus-visible,.transcript summary:focus-visible{outline:3px solid var(--violet-800);outline-offset:3px}
-.cta-band .btn:focus-visible,.stage .btn:focus-visible,.stage button:focus-visible{outline-color:#fff}
+.cta-band .btn:focus-visible,.stage .btn:focus-visible,.stage button:focus-visible,.stage summary:focus-visible{outline-color:#fff}
 .eyebrow{display:inline-flex;align-items:center;gap:9px;margin:0 0 14px;font-size:14px;font-weight:600;color:var(--violet-700)}
 .eyebrow .dot{width:8px;height:8px;border-radius:2px;background:var(--violet);transform:rotate(45deg);box-shadow:0 0 0 4px #6150ea22}
 .fine{font-size:14px;color:var(--muted);margin:14px 0 0}.fine.center{text-align:center;margin-top:34px}
@@ -127,14 +130,14 @@ body[data-view="tool"] #landing{display:none!important}
 .story-text{position:relative;display:grid;gap:8px;padding-inline-start:24px}
 .story-progress{position:absolute;inset-inline-start:0;top:16px;bottom:16px;width:3px;border-radius:3px;background:var(--violet-100)}
 .story-progress i{position:absolute;inset:0;border-radius:inherit;background:var(--violet);transform-origin:top;transform:scaleY(var(--sp,0))}
-.story-item{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start;padding:16px 18px;border-radius:16px;cursor:pointer;opacity:.42;transition:opacity .5s var(--ease),background .5s var(--ease),box-shadow .5s var(--ease)}
+.story-item{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start;padding:16px 18px;border-radius:16px;cursor:pointer;opacity:.66;transition:opacity .5s var(--ease),background .5s var(--ease),box-shadow .5s var(--ease)}
 .story-item h3{margin:4px 0;font-size:21px;color:var(--navy)}
 .story-item p{margin:0;font-size:15.5px;color:var(--muted);line-height:1.85;max-height:0;overflow:hidden;transition:max-height .6s var(--ease)}
 .story-item .step-no{background:var(--tint);color:var(--navy);box-shadow:none;transition:background .4s,color .4s}
 .story-item.on{opacity:1;background:#fff;box-shadow:var(--shadow-m)}
 .story-item.on p{max-height:140px}
 .story-item.on .step-no{background:var(--violet);color:#fff;box-shadow:0 8px 18px #6150ea44}
-.story-item.done{opacity:.62}
+.story-item.done{opacity:.66}
 .story-item.done .step-no{background:#e6f5ef;color:var(--ok)}
 .story-stage{position:relative;height:min(640px,calc(100vh - 150px));perspective:1600px;perspective-origin:50% 30%}
 .stage-glow{position:absolute;inset:4% 0;border-radius:40px;background:radial-gradient(60% 60% at 50% 45%,#e7e3ff,transparent 72%)}
@@ -145,15 +148,15 @@ body[data-view="tool"] #landing{display:none!important}
 .screen{position:absolute;inset:0 0 auto 0;width:100%;transition:transform 1s var(--ease),opacity .8s var(--ease),filter .8s;opacity:0;transform:translate3d(0,80px,-160px) rotateX(-8deg);pointer-events:none}
 .screen.is-on{opacity:1;transform:none}
 .screen.is-past{opacity:0;transform:translate3d(0,-70px,-260px) rotateX(10deg);filter:blur(2px)}
-.callout,.badge{position:absolute;opacity:0;transition:opacity .7s var(--ease),transform 1s var(--ease);pointer-events:none}
-.callout{border-radius:14px;border:1px solid #dfe3f3;background:#fff;box-shadow:0 40px 70px #2a1f8a40,0 10px 24px #12183f22}
+:where(#landing) :is(.callout,.badge){position:absolute;opacity:0;transition:opacity .7s var(--ease),transform 1s var(--ease);pointer-events:none}
+:where(#landing) .callout{border-radius:14px;border:1px solid #dfe3f3;background:#fff;box-shadow:0 40px 70px #2a1f8a40,0 10px 24px #12183f22}
 .c3{width:44%;inset-inline-end:-7%;top:16%;transform:translate3d(0,40px,40px)}
 .c4{width:78%;inset-inline-end:-6%;bottom:-4%;transform:translate3d(0,30px,40px)}
 [data-stage="3"] .c3{opacity:1;transform:translate3d(0,0,90px);transition-delay:.35s}
 [data-stage="4"] .c4{opacity:1;transform:translate3d(0,0,90px);transition-delay:.35s}
-.badge{top:-22px;inset-inline-start:28px;white-space:nowrap;padding:10px 18px;border-radius:99px;background:var(--navy);color:#fff;font-size:14.5px;font-weight:600;box-shadow:0 18px 30px #12183f33;transform:translate3d(0,-12px,60px)}
-.badge::before{content:"";display:inline-block;width:8px;height:8px;margin-inline-end:9px;border-radius:2px;background:#c9c1ff;transform:rotate(45deg)}
-.b4{background:#fff6f5;color:var(--hi);border:1px solid #f4c7c3}.b4::before{background:var(--hi)}
+:where(#landing) .badge{top:-22px;inset-inline-start:28px;white-space:nowrap;padding:10px 18px;border-radius:99px;background:var(--navy);color:#fff;font-size:14.5px;font-weight:600;box-shadow:0 18px 30px #12183f33;transform:translate3d(0,-12px,60px)}
+:where(#landing) .badge::before{content:"";display:inline-block;width:8px;height:8px;margin-inline-end:9px;border-radius:2px;background:#c9c1ff;transform:rotate(45deg)}
+:where(#landing) .b4{background:#fff6f5;color:var(--hi);border:1px solid #f4c7c3}:where(#landing) .b4::before{background:var(--hi)}
 [data-stage="1"] .b1,[data-stage="2"] .b2,[data-stage="3"] .b3,[data-stage="4"] .b4{opacity:1;transform:translate3d(0,0,60px);transition-delay:.45s}
 
 /* ---------- case visual ---------- */
@@ -305,7 +308,7 @@ body[data-view="landing"] .site-footer{padding-bottom:96px}
   .hero-head>*,.showcase-3d,.float,.play-dot{animation:none!important}
   .showcase-3d{transform:none!important}
   .video-frame{transform:none!important}
-  .btn,.step,.judge-steps>li,.case-3d,.screen,.callout,.badge,.stage-3d{transition:none!important}
+  .btn,.step,.judge-steps>li,.case-3d,.screen,.callout,:where(#landing) .badge,.stage-3d{transition:none!important}
 }
 @media(forced-colors:active){
   .btn,.story-item.on,.window,.float,.callout{border:1px solid CanvasText}

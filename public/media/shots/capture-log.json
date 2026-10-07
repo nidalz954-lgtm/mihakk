@@ -1,5 +1,5 @@
 {
-  "url": "http://127.0.0.1:3220/",
+  "url": "http://127.0.0.1:3221/",
   "fixtures": [
     "02-full-mutated.csv",
     "reference-full-synthetic.csv"
@@ -19,7 +19,7 @@
     "metrics: صفوف الملف 6,237 فُحصت جميع الصفوف حالات المراجعة 8 قد تجتمع حالات في صف واحد أولوية عالية 5 ابدأ بقراءة دليلها أزواج نصية 6,233 مصدر كل زوج ظاهر في الحالة",
     "element frag-metrics 1132x140",
     "shot 03b-list",
-    "element frag-list 1120x1036",
+    "element frag-list 1120x1253",
     "opened: النفي موجود في نص وغائب من الآخر — 2:3",
     "shot 03c-case",
     "element frag-case 830x828",
