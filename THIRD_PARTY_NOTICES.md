@@ -30,7 +30,10 @@
 حُفظت حزم المصدر وبصماتها ومطابقة التوزيع في سجل الفحص المحلي `07-verification/judging-2026-10-05/final-sources-jury/` خارج حزمة الموقع. لا تُنشر حزم npm الكاملة أو ملفات فحص المصدر مع المنتج؛ ملفات الإشعارات المذكورة جزء من التوزيع، ويجب أن تبقى في البناء والحزمة النهائية.
 
 **تُجلب وقت التشغيل ولا تُضمّن:**
-- **ONNX Runtime WASM:** من الإصدار المثبت على jsDelivr، MIT.
+- **ONNX Runtime WASM لمساري الفحص السياقي والتضمين E5:** صار مضمّنًا في `public/vendor/ort/` ولا يُجلب من شبكة توصيل محتوى. الملفان من حزمة `@huggingface/transformers@3.8.1` (المجلد `dist`) نفسها، ومطابقان لقائمة بصمات الحزمة على jsDelivr، وكلاهما ملف تشغيل onnxruntime-web المرفق بتلك الحزمة، بترخيص MIT (نص الرخصة والإشعارات في الملفين `ONNXRUNTIME-*` المذكورين أعلاه؛ لم نتحقق من رقم commit البناء لهذين الملفين بعينهما):
+  - `ort-wasm-simd-threaded.jsep.mjs`: 44,484 بايت، SHA-256 `08fb86ec433c78bfb032c5d84a68b8e8e5a8d81268fa39e24314179a5767a5b9`.
+  - `ort-wasm-simd-threaded.jsep.wasm`: 21,596,019 بايت، SHA-256 `c46655e8a94afc45338d4cb2b840475f88e5012d524509916e505079c00bfa39`.
+- **ONNX Runtime WASM للسماع على الجهاز في المرشد فقط:** ما زال يُجلب من الإصدار المثبت على jsDelivr بلا SRI، MIT؛ لم يتغيّر في هذا الإصلاح، ولذلك بقي jsDelivr في سياسة CSP.
 - **أوزان النماذج:** تُجلب عند الطلب من revision موثق، ولا تُضمّن في المستودع.
   - `Xenova/multilingual-e5-small`: نسخة ONNX من `intfloat/multilingual-e5-small`، **MIT**. [البطاقة](https://huggingface.co/intfloat/multilingual-e5-small).
   - `Xenova/nli-deberta-v3-small`: نسخة ONNX من `cross-encoder/nli-deberta-v3-small`، **Apache-2.0**. revision `6bc2a55c7c0f7e2bc68de60bb248e523e2612abb`. [البطاقة](https://huggingface.co/cross-encoder/nli-deberta-v3-small).

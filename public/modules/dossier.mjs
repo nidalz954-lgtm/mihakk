@@ -1,6 +1,31 @@
 import {arabicCount} from './ui-helpers.mjs';
 import {knownAttribution} from './trust-protocol.mjs';
 
+/** Cases the reviewer must settle: structural and text-comparison signals. Evidence-state signals are context, not cases. */
+export const INSPECTION_TYPES = ['structural','comparison'];
+const decisionOf = (decisions, id) => decisions?.[id]?.value ?? decisions?.[id]?.decision;
+/**
+ * One definition of "unresolved" (غير محسومة) for the list, metrics, dossier and CSV:
+ * a case is resolved only by a reviewer decision of accept (needs correction) or reject (closed with a reason).
+ * No decision, or a referral that is not closed, stays unresolved.
+ */
+export function caseResolution(finding, decisions = {}) {
+  if (!INSPECTION_TYPES.includes(finding?.type)) return 'evidence_signal_not_counted';
+  const value = decisionOf(decisions, finding.id);
+  return value === 'accept' ? 'resolved_needs_correction' : value === 'reject' ? 'resolved_closed' : value === 'refer' ? 'unresolved_referred' : 'unresolved';
+}
+export const isUnresolvedCase = (finding, decisions = {}) => ['unresolved', 'unresolved_referred'].includes(caseResolution(finding, decisions));
+/** The list filter works on every signal: unresolved means no accept/reject decision, whatever the signal's type. */
+export const isUnresolvedSignal = (finding, decisions = {}) => !['accept', 'reject'].includes(decisionOf(decisions, finding?.id));
+/** Counts behind every "N of M decided" figure, so screen, dossier and CSV cannot disagree. */
+export function caseProgress(findings = [], decisions = {}) {
+  const cases = findings.filter(f => INSPECTION_TYPES.includes(f.type));
+  const count = state => cases.filter(f => caseResolution(f, decisions) === state).length;
+  const accepted = count('resolved_needs_correction'), closed = count('resolved_closed'), referred = count('unresolved_referred'), undecided = count('unresolved');
+  const evidence = findings.filter(f => !INSPECTION_TYPES.includes(f.type));
+  return {cases:cases.length, resolved:accepted + closed, accepted, closed, referred, undecided, unresolved:referred + undecided, evidenceSignals:evidence.length, evidenceUnresolved:evidence.filter(f => !['accept','reject'].includes(decisionOf(decisions, f.id))).length};
+}
+
 /** What actually happened to the optional model run. A partial, cancelled or failed run is never completion. */
 export function aiExecutionState(report) {
   const analysis = report?.provenance?.analysis ?? {};
@@ -10,8 +35,9 @@ export function aiExecutionState(report) {
   const kind = analysis.contextModel || requestedMode.startsWith('context') ? 'context' : 'embedding';
   const processed = Number(kind === 'context' ? analysis.contextProcessedRows : analysis.semanticProcessedRows) || 0;
   const eligible = Number(kind === 'context' ? analysis.contextEligibleRows : analysis.semanticEligibleRows) || 0;
-  const cancelled = analysis.aiCancelled === true || analysis.contextExecution?.cancelled === true;
-  const error = analysis.modelError || analysis.contextError || null;
+  const execution = kind === 'context' ? analysis.contextExecution : analysis.execution;
+  const cancelled = analysis.aiCancelled === true || execution?.cancelled === true;
+  const error = analysis.modelError || analysis.contextError || execution?.error || null;
   const findings = report?.findings ?? [];
   const abstentions = findings.filter(f => f.code === 'context_uncertain').length;
   const truncated = findings.filter(f => ['context_input_truncated','semantic_input_truncated'].includes(f.code)).length;
@@ -49,8 +75,8 @@ function aiGate(ai) {
 /** Review completion checks, not a certificate of translation correctness. */
 export function buildReviewDossier(report, decisions = {}, {revisionReview = null, runManifest = null, team = null} = {}) {
   if (!report?.rows || !report?.findings) throw new Error('لم يُنشأ تقرير فحص بعد.');
-  const inspectionCases = report.findings.filter(f => ['structural','comparison'].includes(f.type));
-  const unresolved = inspectionCases.filter(f => !['accept','reject'].includes(decisions[f.id]?.value ?? decisions[f.id]?.decision));
+  const inspectionCases = report.findings.filter(f => INSPECTION_TYPES.includes(f.type));
+  const unresolved = inspectionCases.filter(f => isUnresolvedCase(f, decisions));
   const referred = inspectionCases.filter(f => (decisions[f.id]?.value ?? decisions[f.id]?.decision) === 'refer');
   const accepted = inspectionCases.filter(f => (decisions[f.id]?.value ?? decisions[f.id]?.decision) === 'accept');
   // Accepting a signal means it needs correction. Resolving a signal is never correcting the source file.
@@ -69,7 +95,7 @@ export function buildReviewDossier(report, decisions = {}, {revisionReview = nul
     {id:'source_authentication',label:'التحقق المستقل من هوية المرجع',status:'required',detail:'يوثق الجلب الحي وصول النص من المزود. يجب على المختص التحقق من هوية المؤلف والطبعة؛ لا تصادق بصمة الملف أو إقرار المستخدم على ذلك.'},
     {id:'source_coverage',label:'تغطية الدليل',status:sourceCoverage || languageAbstentions ? 'hold' : 'recorded',detail:languageAbstentions ? `${languageAbstentions} صف له نص مرجعي لكن المقارنة ممتنعة بسبب اختلاف اللغة. ${sourceCoverage} صف بلا نص مقابل؛ الفحص البنيوي لا يثبت إجراء مقارنة.` : sourceCoverage ? `${sourceCoverage} صف بلا نص مرجعي مقابل؛ يجب توفير الدليل أو الإفصاح عن الامتناع.` : 'نصوص المقارنة المقابلة متاحة للصفوف المؤهلة؛ توافرها لا يثبت صحة المعنى.'},
     aiGate(ai),
-    {id:'case_resolution',label:'قرارات المراجعة',status:unresolved.length ? 'hold' : 'recorded',detail:`${arabicCount(unresolved.length,{one:'حالة معلقة',two:'حالتان معلقتان',few:'حالات معلقة',other:'حالة معلقة'})}، منها ${referred.length} إحالة لم تُغلق.`},
+    {id:'case_resolution',label:'قرارات المراجعة',status:unresolved.length ? 'hold' : 'recorded',detail:`${arabicCount(unresolved.length,{one:'حالة غير محسومة',two:'حالتان غير محسومتان',few:'حالات غير محسومة',other:'حالة غير محسومة'})}: ${referred.length} إحالة لم تُغلق والباقي بلا قرار. المحسوم هو قرار «تحتاج تصحيحاً» أو «إغلاق التنبيه» مع سبب.`},
     {id:'corrections',label:'التصحيحات وإعادة الفحص',status:accepted.length ? 'hold' : 'recorded',detail:accepted.length ? `${arabicCount(accepted.length,{one:'إشارة',two:'إشارتان',few:'إشارات',other:'إشارة'})} قبلها المراجع وتحتاج تصحيحًا في الملف وإعادة فحص؛ لا يعني قبول الإشارة قبول الترجمة.` : 'لا توجد إشارة مقبولة تستدعي إصلاحًا مسجلًا في هذه الجولة.'},
     {id:'expert_signoff',label:'اعتماد المختص خارج الأداة',status:'required',detail:'لا يصدر مِحَكّ اعتمادًا علميًا أو إذن نشر. يتولى المختص والناشر ذلك وفق إجراءاتهم.'},
   ];
@@ -92,5 +118,5 @@ export function buildReviewDossier(report, decisions = {}, {revisionReview = nul
     const detail=team.role!=='manager'?'هذا ملف عمل ضمن فريق. الدمج وملف المتابعة النهائي عند المدير.':approved<total?`${approved} من ${total} حالة وافق عليها مشرف. غير موزعة ${Number(stages.unassigned)||0}، عند المدققين ${Number(stages.assigned)||0}، بانتظار المشرف ${Number(stages.submitted)||0}، مُعادة ${Number(stages.returned)||0}.`:'وافق مشرف على كل الحالات داخل الفريق. الأسماء يكتبها أصحابها، وموافقة المشرف مراجعة داخلية وليست إذن نشر.';
     gates.splice(-1,0,{id:'team_oversight',label:'موافقة المشرفين داخل الفريق',status,detail});
   }
-  return {schemaVersion:'mihakk-review-dossier/1',createdAt:new Date().toISOString(),candidate,scope:report.scope,reference,...(team?{team:{role:team.role,total:Number(team.total)||0,stages:team.stages??{}}}:{}),counts:{cases:inspectionCases.length,unresolved:unresolved.length,referred:referred.length,acceptedSignals:accepted.length,modelAbstentions:ai.abstentions},aiExecution:ai,gates,status:gates.some(g=>g.status==='hold')?'needs_work':'ready_for_expert_review',publicationAuthorized:false,certificate:false,synthetic:candidate.synthetic === true,claim:'مخرج متابعة للمراجعة؛ ليس شهادة صحة ترجمة أو إذن نشر.'};
+  return {schemaVersion:'mihakk-review-dossier/1',createdAt:new Date().toISOString(),candidate,scope:report.scope,reference,...(team?{team:{role:team.role,total:Number(team.total)||0,stages:team.stages??{}}}:{}),counts:{cases:inspectionCases.length,unresolved:unresolved.length,referred:referred.length,acceptedSignals:accepted.length,modelAbstentions:ai.abstentions,resolved:inspectionCases.length-unresolved.length},aiExecution:ai,gates,status:gates.some(g=>g.status==='hold')?'needs_work':'ready_for_expert_review',publicationAuthorized:false,certificate:false,synthetic:candidate.synthetic === true,claim:'مخرج متابعة للمراجعة؛ ليس شهادة صحة ترجمة أو إذن نشر.'};
 }

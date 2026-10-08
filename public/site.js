@@ -135,22 +135,31 @@ if (story && !reduceMotion) {
 // ---------- tool: keep the status / error banner (#notice) out from under the sticky app header ----------
 // The app scrolls to the step heading, which sits BELOW the banner, so a fresh message can end up behind the header.
 // Publish the header height for CSS, and after a message changes and the page has stopped moving, bring the banner
-// into view only if it is covered AND within one screen above the viewport (never yank a reader who is far down the list).
+// into view only if it is covered AND within one screen above the viewport. Keep validation focus in view,
+// and stop a pending correction as soon as the reader chooses to scroll or interact elsewhere.
 const appHeader = $('.app-header'), noticeBox = $('#notice');
 if (appHeader && noticeBox) {
   const publishHeader = () => { const h = appHeader.offsetHeight; if (h > 0) doc.documentElement.style.setProperty('--app-header-h', h + 'px'); };
   if ('ResizeObserver' in window) new ResizeObserver(publishHeader).observe(appHeader); else addEventListener('resize', publishHeader);
   publishHeader();
   let revealTimer = 0;
+  const cancelReveal = () => { clearTimeout(revealTimer); revealTimer = 0; };
   const reveal = () => {
     revealTimer = 0;
     if (doc.body.dataset.view !== 'tool' || noticeBox.hidden || $('#finding-dialog')?.open) return;
+    // app.js focuses an invalid field and supplies an inline alert there. Its focus takes precedence
+    // over the duplicate summary banner, particularly on phones with the software keyboard open.
+    if (doc.activeElement?.matches('input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="true"]')) return;
     const cover = appHeader.getBoundingClientRect().bottom, box = noticeBox.getBoundingClientRect();
     if (box.top < cover && box.bottom > -innerHeight) noticeBox.scrollIntoView({behavior: 'instant', block: 'start'});
   };
   const settle = () => { clearTimeout(revealTimer); revealTimer = setTimeout(reveal, 220); };
   new MutationObserver(settle).observe(noticeBox, {childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class']});
   addEventListener('scroll', () => { if (revealTimer) settle(); }, {passive: true});
+  ['wheel', 'touchstart', 'pointerdown'].forEach(name => addEventListener(name, cancelReveal, {passive: true}));
+  addEventListener('keydown', event => {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab', 'Escape'].includes(event.key)) cancelReveal();
+  });
 }
 
 // ---------- case visual: gentle pointer tilt ----------

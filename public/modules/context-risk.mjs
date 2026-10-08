@@ -1,6 +1,7 @@
 import { BENCHMARK_CASES, BENCHMARK_DATASET } from './benchmark-fixtures.mjs';
 import { auditBatch } from './batch-engine.mjs';
 import { inspectContextPair, CONTEXT_LANGUAGE_GUARD, inspectContextPairForLanguage, MULTILINGUAL_LANGUAGE_GUARD, MULTILINGUAL_CONTEXT_LANGUAGES } from './context-language.mjs';
+import { normalizeWeightIntegrity } from './model-runtime.mjs';
 
 /** Pinned official ONNX derivative; no claim of Quran-domain accuracy. */
 export const NLI_MODEL = Object.freeze({
@@ -46,6 +47,15 @@ export const MULTILINGUAL_NLI_MODEL = Object.freeze({
   use: 'Experimental same-language pairwise contextual review signal (two texts in the same declared language); no cross-language comparison, no certification or automatic approval.',
 });
 export const CONTEXT_MODELS = Object.freeze({ en: NLI_MODEL, multilingual: MULTILINGUAL_NLI_MODEL });
+/**
+ * Exact byte size of each pinned weight file (Hugging Face LFS metadata at the pinned revision; the LFS oid equals weightSha256).
+ * Kept outside the frozen model specs on purpose: the specs are part of the evidence fingerprint, so they must not change.
+ */
+export const CONTEXT_WEIGHT_BYTES = Object.freeze({ [NLI_MODEL.id]: 172440643, [MULTILINGUAL_NLI_MODEL.id]: 338679132 });
+/** What the worker must see on the wire: URL as transformers.js builds it, the pinned SHA-256 and the exact size. */
+export function contextWeightPin(spec) {
+  return { url: `https://huggingface.co/${spec.id}/resolve/${spec.revision}/${spec.weightFile}`, sha256: spec.weightSha256, bytes: CONTEXT_WEIGHT_BYTES[spec.id] ?? null, label: spec.id };
+}
 export function contextModelSpec(key) { return CONTEXT_MODELS[key] ?? NLI_MODEL; }
 /** Which context model a report was run with; reports from earlier versions are English. */
 export function contextModelKeyOf(report) {
@@ -202,6 +212,10 @@ function ensureWorker() {
       error.partialResults = [...job.partial.values()];
       error.execution = data.execution ?? {};
       error.actualInference = error.partialResults.length > 0 || error.execution.actualInference === true;
+      // Original runtime text (usually English) is kept apart from the Arabic message shown to the user.
+      if (typeof data.technicalDetails === 'string' && data.technicalDetails) error.technicalDetails = data.technicalDetails.slice(0, 600);
+      // A failed worker is not kept alive (memory): the next run starts a clean one. Completed chunks are already collected above.
+      if (!pending.size) { worker?.terminate(); worker = undefined; }
       job.reject(error);
     } else {
       job.resolve({ results: [...job.partial.values()], execution: data.execution });
@@ -279,8 +293,9 @@ export function appendContextResults(report, results = [], execution = {}, model
     if (languageBlockedKeys.has(row.key)) row.contextNotEligibleReason = blockedReason;
     row.contextStatus = eligibleKeys.has(row.key) ? 'not_processed' : 'not_eligible';
     const otherReview = row.findings.some((finding) => finding.type === 'structural' || finding.type === 'comparison');
-    // Rule abstentions (numeric or qualifier syntax) must survive the context step; they are not "no signal".
-    const ruleAbstained = row.numericReview?.state === 'abstain' || row.qualifierReview?.state === 'abstain';
+    // A model result cannot turn checks the rules did not perform into "no signal".
+    const ruleAbstained = row.numericReview?.state === 'abstain' || row.qualifierReview?.state === 'abstain'
+      || row.languageReview?.state === 'abstain' || row.negationReview?.state === 'abstain';
     row.status = otherReview ? 'needs_review' : row.comparisonStatus === 'abstain' || ruleAbstained ? 'abstain' : 'no_signal';
   }
   enriched.findings = enriched.findings.filter((finding) => !String(finding.id).startsWith('context-'));
@@ -348,6 +363,8 @@ export function appendContextResults(report, results = [], execution = {}, model
     row.status = hasReview ? 'needs_review' : unverified || classification.outcome === 'abstain' ? 'abstain' : row.status;
   }
   const processed = realExecution ? accepted.size : 0;
+  // The pinned weight hash is only "declared" unless the worker hashed the loaded file and it matched (BUG-09).
+  const { weightIntegrity: reportedWeightIntegrity, ...executionRecord } = execution;
   const unverifiedRows = [...accepted.keys()].filter((key) => rowsByKey.get(key).nli.experimentalUnverifiedReference).length;
   enriched.provenance.analysis = {
     ...enriched.provenance.analysis,
@@ -361,7 +378,8 @@ export function appendContextResults(report, results = [], execution = {}, model
     contextLanguageGuard: guard,
     contextCompleted: execution.completed === true && processed === eligible.length,
     experimentalComparisonWithUnverifiedReferenceCount: realExecution ? unverifiedRows : 0,
-    contextExecution: execution,
+    contextWeightIntegrity: normalizeWeightIntegrity(spec.weightSha256, reportedWeightIntegrity),
+    contextExecution: executionRecord,
     contextError: execution.error ?? null,
     limitations: [...new Set([...(enriched.provenance.analysis.limitations ?? []),
       ...(multilingual ? ['Multilingual NLI was trained largely on machine-translated general NLI data, not validated on Quran translations in any language.', 'Only two texts in the same declared language are compared; a translation is never compared with the Arabic Quran text.', MULTILINGUAL_NLI_MODEL.trainingDataNote] : ['English NLI was trained on SNLI/MultiNLI, not validated on Quran translations.']),
@@ -378,6 +396,8 @@ export function appendContextResults(report, results = [], execution = {}, model
     needsReviewRows: enriched.rows.filter((row) => row.status === 'needs_review').length,
     noSignalRows: enriched.rows.filter((row) => row.status === 'no_signal').length,
     abstainRows: enriched.rows.filter((row) => row.status === 'abstain').length,
+    ...(enriched.summary.languageLimits ? {languageLimits: {...enriched.summary.languageLimits,
+      rowsAbstained: enriched.rows.filter(row => row.status === 'abstain' && row.languageReview?.state === 'abstain').length}} : {}),
     contextProcessedRows: processed, contextEligibleRows: eligible.length,
     contextAbstainRows: (realExecution ? [...accepted.keys()].filter((key) => rowsByKey.get(key).nli.classification.outcome === 'abstain').length : 0) + languageBlockedKeys.size,
     contextLanguageBlockedRows: languageBlockedKeys.size,
@@ -404,6 +424,7 @@ export async function runContextRisk(report, onProgress, { model: modelKey = 'en
       actualInference: error.actualInference === true, completed: false,
       cancelled: error.name === 'ContextRiskCancelledError',
       error: error.message, elapsedMS: Math.round(nowMS() - started),
+      ...(error.technicalDetails ? { technicalDetails: error.technicalDetails } : {}),
       inferredAt: (error.partialResults?.length ?? 0) > 0 ? new Date().toISOString() : null,
     }, key);
   }

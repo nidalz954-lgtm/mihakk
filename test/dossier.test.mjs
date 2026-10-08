@@ -14,6 +14,19 @@ test('cancelled context run with partial results stays on hold',()=>{const out=b
 test('partial run without an error is still incomplete',()=>{const out=buildReviewDossier(resolvedWithAI({requestedMode:'context-requested',contextModel:{id:'m'},contextProcessedRows:3,contextEligibleRows:5}));assert.equal(out.aiExecution.state,'partial');assert.equal(out.status,'needs_work');});
 test('embedding failure recorded by the UI blocks the dossier',()=>{const out=buildReviewDossier(resolvedWithAI({requestedMode:'embedding-requested',modelError:'download failed'}));assert.equal(out.aiExecution.state,'failed');assert.equal(out.aiExecution.kind,'embedding');assert.equal(out.status,'needs_work');});
 test('user cancellation before inference is persisted as cancelled',()=>{const out=buildReviewDossier(resolvedWithAI({requestedMode:'embedding-requested',aiCancelled:true}));assert.equal(out.aiExecution.state,'cancelled');assert.equal(out.status,'needs_work');});
+test('embedding partial execution retains the underlying failure in the review gate',()=>{
+  const out=buildReviewDossier(resolvedWithAI({requestedMode:'embedding-requested',semanticProcessedRows:2,semanticEligibleRows:5,execution:{actualInference:true,completed:false,error:'local worker stopped'}}));
+  assert.equal(out.aiExecution.state,'failed');
+  assert.equal(out.aiExecution.processed,2);
+  assert.equal(out.status,'needs_work');
+  assert.match(out.gates.find(g=>g.id==='ai_execution').detail,/local worker stopped/);
+});
+test('embedding worker cancellation remains cancellation even with partial results and an error',()=>{
+  const out=buildReviewDossier(resolvedWithAI({requestedMode:'embedding-requested',semanticProcessedRows:2,semanticEligibleRows:5,execution:{actualInference:true,completed:false,cancelled:true,error:'AbortError'}}));
+  assert.equal(out.aiExecution.state,'cancelled');
+  assert.equal(out.aiExecution.processed,2);
+  assert.equal(out.status,'needs_work');
+});
 test('requested model skipped after a source failure is not reported as complete',()=>{const out=buildReviewDossier(resolvedWithAI({requestedMode:'context-requested',aiSkippedReason:'reference fetch failed'}));assert.equal(out.aiExecution.state,'not_run');assert.equal(out.status,'needs_work');});
 test('no eligible pairs is disclosed without blocking',()=>{const out=buildReviewDossier(resolvedWithAI({requestedMode:'context-requested',contextModel:{id:'m'},contextProcessedRows:0,contextEligibleRows:0,contextError:null}));assert.equal(out.aiExecution.state,'no_pairs');assert.equal(out.gates.find(g=>g.id==='ai_execution').status,'limited');assert.equal(out.status,'ready_for_expert_review');});
 test('complete run keeps abstentions visible in counts and gate text',()=>{const out=buildReviewDossier(resolvedWithAI({requestedMode:'context-requested',contextModel:{id:'m'},contextProcessedRows:2,contextEligibleRows:2,contextCompleted:true},[{id:'c1',code:'context_uncertain',type:'evidence'}]));assert.equal(out.aiExecution.state,'complete');assert.equal(out.counts.modelAbstentions,1);assert.match(out.gates.find(g=>g.id==='ai_execution').detail,/امتنع النموذج في 1/);assert.equal(out.status,'ready_for_expert_review');assert.equal(out.publicationAuthorized,false);});

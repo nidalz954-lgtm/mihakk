@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {File} from 'node:buffer';
 import {deflateRawSync} from 'node:zlib';
+import {spawnSync} from 'node:child_process';
 import {parseDelimited, rowsFromMatrix, parseTranslationFile, inspectTranslationFile, asciiDigits, validateZipBudget, parseXML} from '../public/modules/file-parser.mjs';
 import * as XLSX from '../public/vendor/xlsx-0.20.3.mjs';
 import {verifiedStoredZip, crc32, inspectZipEntries} from '../public/modules/xlsx-secure-zip.mjs';
@@ -9,6 +10,23 @@ test('quoted CSV newlines commas escaped quotation marks', () => {
   assert.deepEqual(parseDelimited('surah,ayah,translation\r\n1,1,"A, B\nC ""D"""\r\n'), [['surah','ayah','translation'],['1','1','A, B\nC "D"']]);
 });
 test('unclosed CSV rejected', () => assert.throws(() => parseDelimited('a,b\n1,"oops'), /اقتباس/));
+test('blank-heavy delimiter fallback rejects at the row limit within a bounded heap', () => {
+  // This input formerly allocated millions of split-line strings before the
+  // parser could reject it. A child heap cap makes that regression observable.
+  const child = spawnSync(process.execPath, ['--max-old-space-size=96', '--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { parseDelimited } from ${JSON.stringify(new URL('../public/modules/file-parser.mjs', import.meta.url).href)};
+    assert.throws(() => parseDelimited('\\n'.repeat(24 * 1024 * 1024)), /20,000/);
+  `], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(child.status, 0, child.error?.message ?? child.stderr);
+});
+test('fallback keeps first non-blank line delimiter counts and original tie order', () => {
+  for (const newline of ['\n', '\r', '\r\n']) {
+    assert.deepEqual(parseDelimited(` ${newline}${newline}title|body|other${newline}1|hello`), [[' '], [''], ['title','body','other'], ['1','hello']]);
+  }
+  // No consistent sampled table: the old fallback preferred comma on a tie.
+  assert.deepEqual(parseDelimited('alpha,beta|gamma\nx'), [['alpha','beta|gamma'], ['x']]);
+});
 test('invalid CSV closing rejected', () => assert.throws(() => parseDelimited('a,b\n1,"oops"x'), /بنية/));
 test('Arabic aliases and unicode digits', () => {
   assert.deepEqual(rowsFromMatrix([['سورة','آية','ترجمة'],['١','۲','hello']]).rows[0], {surah:'1',ayah:'2',translation:'hello',rowNumber:2});

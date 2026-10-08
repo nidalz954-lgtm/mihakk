@@ -1,16 +1,18 @@
 # مِحَكّ — فرز مخاطر ملفات ترجمة معاني القرآن قبل مراجعة المختص
 
-الإصدار: **0.4.2** · الترخيص: [MIT](LICENSE) للشفرة فقط · الحقوق والمصادر: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) · [SOURCE_AND_RIGHTS.md](SOURCE_AND_RIGHTS.md) · [BASELINE.md](BASELINE.md) · [CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md)
+الإصدار: **0.4.3 — إصلاحات صيانة بعد التسليم** · الترخيص: [MIT](LICENSE) للشفرة فقط · [المصادر والحقوق](SOURCE_AND_RIGHTS.md) · [إشعارات الطرف الثالث](THIRD_PARTY_NOTICES.md)
 
 مِحَكّ أداة فرز تساعد المراجع المختص. تفحص ملف الترجمة كاملًا وتُظهر الحالات التي تحتاج نظرًا، مع نصّها ودليلها ومصدرها. **لا تترجم، ولا تُفتي، ولا تُصدر شهادة، والقرار للمختص.** غياب الإشارة لا يعني أن المعنى صحيح. ملف المتابعة وتقرير JSON يصرّحان بأنهما ليسا شهادة ولا إذن نشر.
 
-طُوِّر بمساعدة أدوات برمجة بالذكاء الاصطناعي (Claude Code وOpenAI Codex) بتوجيه المؤسس. ما قبل 4 أكتوبر 2026 موثّق كنقطة بداية في [BASELINE.md](BASELINE.md) (ويذكر نموذج التشابه)، وتشغيل مؤشر التعارض NLI قبل التحدي مسجّل في سجل 3 أكتوبر خارج هذا المستودع. المراجعات التي أُجريت على المشروع أجراها وكلاء ذكاء اصطناعي، وليست لجانًا بشرية ولا مستقلة، ولم يراجع المنتج أي مختص شرعي أو لغوي بشري بعد.
+أُعدّ الإصدار 0.4.3 يوم 8 أكتوبر 2026 من إصلاحات Claude Code وOpenAI Codex بعد التسليم. بدأ بفرع مراجعة، ثم أذن المؤسس صراحة بنشر الإصلاحات على رابط الموقع الحالي. هذا تفويض مالك المشروع، ولم يتلقَّ إذن المنظم باستبدال النسخة المقدمة. راجع [سجل المراجعة المؤرخ وحدود التحقق](docs/POST_SUBMISSION_REVIEW_2026-10-08.md).
 
-## جرّبه
+طُوِّر المشروع بمساعدة أدوات برمجة بالذكاء الاصطناعي بتوجيه المؤسس. المراجعات المذكورة أجراها وكلاء ذكاء اصطناعي، وليست لجنة بشرية ولا مراجعة مستقلة من جهة خارج الفريق. **لم يراجع المنتج أي مختص شرعي أو لغوي بشري بعد.** العمل السابق للتحدي موثّق في [BASELINE.md](BASELINE.md)، وتسلسل التغييرات في [CHANGELOG.md](CHANGELOG.md) و[الإفصاح](docs/AI_DISCLOSURE_AR.md).
 
-- النسخة الحية (GitHub Pages): https://nidalz954-lgtm.github.io/mihakk/ (منشورة وتعمل؛ آخر فحص آلي من الخارج 6 أكتوبر 2026)
-- الوثائق: [دليل الاستخدام](docs/USER_GUIDE_AR.md) · [الحدود المعروفة](docs/KNOWN_ISSUES.md) · [الإفصاح عن الذكاء الاصطناعي](docs/AI_DISCLOSURE_AR.md) · [المصادر والحقوق](SOURCE_AND_RIGHTS.md)
-- أو محليًا (Node.js 20.12 أو أحدث، بلا `npm install` وبلا مفاتيح):
+## التشغيل
+
+- [رابط الموقع](https://nidalz954-lgtm.github.io/mihakk/)؛ لتأكيد الإصدار الذي يخدمه Pages راجع [build-info.json](https://nidalz954-lgtm.github.io/mihakk/build-info.json) وحالة النشر في GitHub Actions.
+- الوثائق: [دليل الاستخدام](docs/USER_GUIDE_AR.md) · [الحدود الحالية والتاريخية](docs/KNOWN_ISSUES.md) · [الأمن والخصوصية](SECURITY.md).
+- محليًا: Node.js 20.12 أو أحدث، بلا `npm install` وبلا مفاتيح:
 
 ```sh
 node launch.mjs
@@ -19,7 +21,7 @@ node launch.mjs
 يفتح المشغّل عنوانًا محليًا يبدأ من المنفذ 3200. للتطوير:
 
 ```sh
-npm test          # الاختبارات الحالية (بلا corpus خاص)
+npm test          # الاختبارات الحالية؛ النتيجة تخص النسخة التي شُغّلت عليها
 npm run build     # يبني الموقع الثابت في dist/ مع بصمات وفحص أسرار
 npm start         # خادم محلي على http://127.0.0.1:3000
 ```
@@ -27,41 +29,41 @@ npm start         # خادم محلي على http://127.0.0.1:3000
 ## ماذا يفحص
 
 - **بدون ذكاء اصطناعي:** أرقام الآيات الناقصة ضمن النطاق المحدد، والأرقام المكررة أو الخارجة عن العدّ الكوفي (6,236 آية)، والخانات الفارغة، والصفوف التي رجع ترتيبها، وشوائب النص. هذا فحص لبنية الملف، وليس لصحة المعنى.
-- **مقارنة بمرجع:** بلا مرجع، أو قراءة مباشرة من Quranpedia، أو ملف مرجعي يرفعه المستخدم. وصول النص من مصدره لا يعني اعتماد صحة الترجمة.
-- **مقارنة النسخ:** نسخة جديدة مقابل نسختها السابقة من العمل نفسه. هذا أفضل استخدام للأداة.
-- **الذكاء الاصطناعي اختياري وتجريبي:** نتيجته إشارة للمراجعة، لا نسبة دقة ولا حكم، وغير مدرَّب على ترجمات القرآن. النماذج المذكورة في الكود: `Xenova/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`، `Xenova/multilingual-e5-small`، `Xenova/nli-deberta-v3-small`.
-- الحالات مرتبة حسب أولوية قواعد الفحص. الترتيب لا يقيس خطورة المعنى، والحكم للمراجع.
-- **النص القرآني للعرض فقط:** يُعرض بجانب كل حالة ليقرأه المراجع، ولا يقارن البرنامج الترجمة به آليًا. المصدر: [Quranpedia](https://quranpedia.net) (مصحف حفص)، نسخة البيانات 2026-10-06، والملف `public/data/quran-hafs-quranpedia.json` مثبّت ببصمة SHA-256 `c414b5e5d4ae38bb99cf9c66ea44cb2b1a7aaa7053c2a5c4fa155cab17d15de8`. شروط Quranpedia: Quranpedia.net data license, version 2026-10-06: free to use inside apps; republishing as a dataset requires crediting Quranpedia.net with a link and stating the dump version. https://api.quranpedia.net/dumps/LICENSE.md
+- **المقارنة:** بلا مرجع، أو بقراءة مباشرة من Quranpedia، أو بملف مرجعي يرفعه المستخدم. وصول النص من مصدره لا يعني اعتماد صحة الترجمة. مقارنة النسخة الجديدة بنسختها السابقة من العمل نفسه أنسب من تفسير فروق ترجمتين مختلفتين بوصفها أخطاء.
+- **حدود القواعد اللغوية صريحة:** اللغة غير المدعومة بالقواعد تبقى لها حالة امتناع، حتى لو تطابق النصان. قد تظهر فيها إشارات أخرى؛ والمؤشر متعدد اللغات يبقى خطوة اختيارية منفصلة. اختلاف عدد علامات النفي حين يوجد النفي في الطرفين لا يُعرض وحده كإثبات لتغير المعنى.
+- **الذكاء الاصطناعي اختياري وتجريبي:** إشارة للمراجعة، لا نسبة دقة ولا حكم، وغير معايَر على ترجمات القرآن. النماذج: `Xenova/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`، `Xenova/multilingual-e5-small`، `Xenova/nli-deberta-v3-small`.
+- **الفحص داخل Worker:** قراءة XLSX والفحص الأساسي يعملان في عامل داخل المتصفح قابل للإيقاف. تعطل نموذج لاحق يبقي النتائج المكتملة مع إعلان الفشل والتغطية؛ لا يحوّل التشغيل الجزئي إلى نجاح كامل.
+- **المراجعة البشرية المسجَّلة:** تحفظ القرارات محليًا مع ربطها بدليل الحالة. قرارات النقص والحالات الشاملة للملف والتكرار ترتبط أيضًا ببصمة الملف الكامل؛ تبقى الحالات النصية مرتبطة بدليلها. يظهر تنبيه قبل التخلي عن قرارات محفوظة في الذاكرة فقط عند إعادة الفحص أو تغيير الملف. هذا حفظ في المتصفح، وليس توقيعًا موثوقًا ولا اعتمادًا علميًا.
+- **النص القرآني للعرض فقط:** يُعرض بجانب الحالة ولا يُقارن البرنامج الترجمة به آليًا. المصدر [Quranpedia](https://quranpedia.net) (مصحف حفص)، نسخة 2026-10-06، الملف `public/data/quran-hafs-quranpedia.json`، SHA-256: `c414b5e5d4ae38bb99cf9c66ea44cb2b1a7aaa7053c2a5c4fa155cab17d15de8`. [رخصة المصدر](https://api.quranpedia.net/dumps/LICENSE.md) تتيح الاستخدام داخل التطبيقات؛ إعادة نشر البيانات تستلزم نسبتها وربط المصدر وذكر نسخة التفريغ.
 
 ## الخصوصية والاتصالات الخارجية
 
-ملف ترجمتك لا يُرفع إلى أي خادم، وقراءته وفحصه يجريان داخل متصفحك. يتصل البرنامج بالإنترنت فقط في هذه الحالات:
+قراءة ملف الترجمة ومسارات فحصه تجريان داخل المتصفح، ولا يوجد خادم تطبيقات يستقبل هذا الملف. تحتاج بعض الخيارات إلى اتصال:
 
-| متى | العنوان | ماذا يُرسل أو يُنزَّل |
+| متى | الوجهة | البيانات أو الملفات |
 |---|---|---|
-| اختيار المرجع المباشر | `api.quranpedia.net` | رقم الكتاب والسورة فقط |
-| تشغيل النموذج التجريبي | `huggingface.co` | تنزيل أوزان النموذج أول مرة |
-| تشغيل النموذج التجريبي | `cdn.jsdelivr.net` | تنزيل ملفات تشغيل ONNX Runtime (WASM) من jsDelivr، بلا فحص سلامة (SRI) |
-| الصوت في «المرشد» (اختياري) | خدمة الكلام في المتصفح، أو `huggingface.co` للنموذج المحلي | خيار «موافق» قد يرسل الصوت إلى خدمة المتصفح (Google أو Microsoft)؛ خيار «اسمع على جهازي فقط» ينزّل نموذجًا صغيرًا نحو 77 ميغابايت ويبقي الصوت على الجهاز |
+| اختيار المرجع المباشر | `api.quranpedia.net` | رقم الكتاب والسورة، لجلب المرجع |
+| تشغيل NLI أو E5 | `huggingface.co` ونطاقات تنزيله | تنزيل ملفات النموذج أول مرة؛ أوزانه المثبتة تُفحص ببصمة SHA-256 قبل الاستعمال |
+| تشغيل NLI أو E5 | ملفات الموقع نفسه | ONNX Runtime من `public/vendor/ort/`؛ اختبارات المستودع تقارن ملفاته بالبصمات المثبتة |
+| «اسمع على جهازي فقط» في المرشد | Hugging Face و`cdn.jsdelivr.net` | نموذج Whisper نحو 77 ميغابايت وملفات تشغيله؛ هذا المسار ما زال يستخدم jsDelivr بلا SRI، والصوت يُعالج محليًا |
+| خدمة الكلام في المتصفح بعد الموافقة | خدمة المتصفح، مثل Google أو Microsoft | قد يُرسل الصوت إلى مزود الخدمة |
 
-لذلك لا يعمل وضع الذكاء الاصطناعي بلا إنترنت في أول تشغيل. الصفحة تحمل سياسة أمان (CSP) داخلها مطابقة لترويسة الخادم المحلي (`src/static-app.mjs`)، فتسري أيضًا على GitHub Pages.
+لا تعمل النماذج بلا إنترنت في أول تشغيل. فحص بصمة أوزان النموذج لا يصادق على جودة نتائجه. سياسة CSP داخل الصفحة تسري على GitHub Pages؛ بعض ترويسات الخادم المحلي لا تتوفر هناك. التفاصيل في [SECURITY.md](SECURITY.md).
 
-## إعادة تشغيل الأدلة
+## أدلة التحقق وحدودها
 
 ```sh
-npm test                                  # كل الاختبارات الحالية
-node --test test/fixtures.test.mjs        # اختبارات الملفات الاصطناعية (بعضها يتخطى نفسه إن غابت الملفات المولّدة)
-node scripts/benchmark-injected.mjs       # قياس أخطاء مزروعة في نصوص اصطناعية غير دينية (يطبع JSON)
+npm test
+node --test test/fixtures.test.mjs
+node scripts/benchmark-injected.mjs
 ```
 
-البيانات التعليمية في الاختبارات نصوص اصطناعية غير دينية، وليست آيات ولا ترجمات قرآنية.
+أمثلة التعليم العامة نصوص اصطناعية غير دينية، وليست آيات ولا ترجمات قرآنية. اختبارات البروتوكولات والأخطاء المصطنعة لا تثبت دقة النماذج. نتائج نسخة القبول السابقة ونتيجة مرشح الرفع تُفصلان في [سجل المراجعة](docs/POST_SUBMISSION_REVIEW_2026-10-08.md)؛ لا يُنقل عدد اختبارات نسخة قديمة إلى نسخة لاحقة.
 
-## ما ليس في هذا المستودع
+## نطاق المستودع
 
-- الـcorpus الخاص وكود نسخة 0.1 القديمة (لم تُحسم حقوق نشره).
-- ملفات الاختبار الداخلية على نصوص حقيقية، والفيديو والعرض والحزم.
-- أي مفاتيح أو أسرار.
+يضم الشفرة العامة والاختبارات والوثائق والموارد المصرح بإدراجها، ومنها وسائط صفحة الهبوط الموجودة في `public/media/`. لا يضم corpus خاصًا أو ملفات الترجمة الداخلية أو سجلات الجلسات أو مفاتيح الحسابات أو حزم التسليم والعرض القابلة للتحرير. [PUBLIC_EXPORT.md](docs/PUBLIC_EXPORT.md) سجل تصدير تاريخي لنسخة 0.4.2؛ بصماته لا تصف مرشح المراجعة الحالي.
 
 ## English summary
 
-Mihakk is a browser-local triage tool for Quran-meaning translation files before expert review. It does not translate, issue rulings, or certify. Structural checks run without AI; the optional AI signals are experimental and are not accuracy scores. Translation files never leave the browser. Developed with AI coding tools (Claude Code and OpenAI Codex) under the founder's direction. Reviews mentioned in this project were run by AI agents, not independent or human panels. Code: MIT. Third-party material: see THIRD_PARTY_NOTICES.md.
+Mihakk is a browser-local triage tool for Quran-meaning translation files before expert review. It does not translate, issue rulings, or certify. Version **0.4.3** is a post-submission maintenance release prepared with Claude Code and OpenAI Codex. The project owner explicitly authorized publication on the existing Pages URL. Organizer permission to replace the submitted version has not been received; the release does not claim such permission. AI signals remain experimental. Reviews were performed by AI agents, not an independent human panel; no human religious or linguistic expert has validated the product. See the [dated review record](docs/POST_SUBMISSION_REVIEW_2026-10-08.md) for validation scope and limitations.

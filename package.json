@@ -1,13 +1,13 @@
 {
   "name": "mihakk-mvp",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "description": "Browser-local pre-publication translation review with traceable sources and experimental contextual AI; no religious certification.",
   "scripts": {
     "start": "node server.mjs",
     "build": "node scripts/build.mjs",
-    "test": "node --test --test-concurrency=1 test/batch-engine.test.mjs test/file-parser.test.mjs test/reference-api.test.mjs test/semantic.test.mjs test/static.test.mjs test/dossier.test.mjs test/trust-protocol.test.mjs test/context-risk.test.mjs test/context-multilingual.test.mjs test/ui-helpers.test.mjs test/export-redaction.test.mjs test/text-hygiene.test.mjs test/build.test.mjs test/fixtures.test.mjs test/revision-review.test.mjs test/run-manifest.test.mjs test/launch.test.mjs test/team-workflow.test.mjs test/quran-index.test.mjs test/quran-text.test.mjs test/assistant-knowledge.test.mjs test/site.test.mjs"
+    "test": "node --test --test-concurrency=1 test/batch-engine.test.mjs test/file-parser.test.mjs test/reference-api.test.mjs test/semantic.test.mjs test/static.test.mjs test/dossier.test.mjs test/trust-protocol.test.mjs test/context-risk.test.mjs test/context-multilingual.test.mjs test/ui-helpers.test.mjs test/export-redaction.test.mjs test/text-hygiene.test.mjs test/build.test.mjs test/fixtures.test.mjs test/revision-review.test.mjs test/run-manifest.test.mjs test/launch.test.mjs test/team-workflow.test.mjs test/quran-index.test.mjs test/quran-text.test.mjs test/assistant-knowledge.test.mjs test/site.test.mjs test/engine-parsing-fixes.test.mjs test/engine-parsing-fixes-files.test.mjs test/model-workers.test.mjs test/model-download.test.mjs test/ort-selfhost.test.mjs test/ui-state-decisions.test.mjs test/ui-messages.test.mjs test/batch-review.test.mjs"
   },
   "engines": {
     "node": ">=20.12"

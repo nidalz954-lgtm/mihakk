@@ -11,6 +11,19 @@ import { createRunManifest } from '../public/modules/run-manifest.mjs';
 
 // Authored NONRELIGIOUS sentences and injected probabilities: protocol and gating only, not trained inference or accuracy.
 const contradict = { contradiction: 0.8, entailment: 0.1, neutral: 0.1 };
+
+test('language abstention counters follow an injected risk and removal without losing the rule limit (protocol only)',()=>{
+  const source=report({candidateLanguage:'fr',referenceLanguage:'fr',candidate:'Le magasin est ouvert lundi.',reference:'Le magasin est fermé lundi.'});
+  assert.equal(source.rows[0].status,'abstain');
+  const result=aggregateContextScores(contradict,contradict,{key:source.rows[0].key,model:MULTILINGUAL_NLI_MODEL.id,revision:MULTILINGUAL_NLI_MODEL.revision,modelCalls:2,pairTokens:20,usedPairTokens:20,referenceTokens:9,candidateTokens:9,truncated:false});
+  const enriched=appendContextResults(source,[result],{actualInference:true,completed:true},'multilingual');
+  assert.equal(enriched.rows[0].status,'needs_review');
+  assert.equal(enriched.summary.languageLimits.rowsLimited,1);
+  assert.equal(enriched.summary.languageLimits.rowsAbstained,0);
+  const rerun=appendContextResults(enriched,[],{actualInference:false,completed:false},'multilingual');
+  assert.equal(rerun.rows[0].status,'abstain');
+  assert.equal(rerun.summary.languageLimits.rowsAbstained,1);
+});
 function input({ candidateLanguage = 'ar', referenceLanguage = 'ar', candidate = 'المكتبة مغلقة يوم الاثنين.', reference = 'المكتبة مفتوحة يوم الاثنين.', mode = 'context-multi-requested' } = {}) {
   return {
     rows: [{ surah: 112, ayah: 1, translation: candidate, rowNumber: 2 }],

@@ -377,11 +377,28 @@ test('uploaded reference with unknown or undeclared language never feeds English
 
 test('rule abstentions (numeric/qualifier syntax) stay abstain after the context step, never no_signal', async () => {
   const { auditBatch: audit } = await import('../src/batch-engine.mjs');
-  for (const [candidate, reference] of [['About 3 boxes are here.', 'About 4 boxes are here.'], ['May the shop open.', 'May the shop open early.']]) {
-    const source = audit({ rows: [{ surah: 1, ayah: 1, translation: candidate }], referenceRows: [{ surah: 1, ayah: 1, translation: reference }], scope: { type: 'provided' }, metadata: { candidate: { language: 'en' }, reference: { sourceKind: 'synthetic-teaching', verificationStatus: 'verified', language: 'en', title: 'synthetic' } } });
+  for (const [candidate, reference, language = 'en'] of [
+    ['About 3 boxes are here.', 'About 4 boxes are here.'],
+    ['May the shop open.', 'May the shop open early.'],
+    ['The clerk does not say the room is not ready.', 'The clerk does not say the room is ready.'],
+    ['Le magasin est ouvert.', 'Le magasin est ouvert.', 'fr']
+  ]) {
+    const source = audit({ rows: [{ surah: 1, ayah: 1, translation: candidate }], referenceRows: [{ surah: 1, ayah: 1, translation: reference }], scope: { type: 'provided' }, metadata: { candidate: { language }, reference: { sourceKind: 'synthetic-teaching', verificationStatus: 'verified', language, title: 'synthetic' } } });
     assert.equal(source.rows[0].status, 'abstain', candidate);
     const output = appendContextResults(source, [], { actualInference: false, completed: true });
     assert.equal(output.rows[0].status, 'abstain', candidate);
     assert.equal(output.summary.noSignalRows, 0, candidate);
   }
+});
+
+test('injected entailment and a later empty rerun cannot erase a negation-scope abstention (protocol only)', () => {
+  const source=report({candidate:'The clerk does not say the room is not ready.',reference:'The clerk does not say the room is ready.'});
+  assert.equal(source.rows[0].status,'abstain');
+  const enriched=appendContextResults(source,[rawResult(source.rows[0].key,entail,entail)],{actualInference:true,completed:true});
+  assert.equal(enriched.rows[0].nli.classification.outcome,'no_signal');
+  assert.equal(enriched.rows[0].status,'abstain');
+  assert.equal(enriched.rows[0].negationReview.state,'abstain');
+  const rerun=appendContextResults(enriched,[],{actualInference:false,completed:false});
+  assert.equal(rerun.rows[0].status,'abstain');
+  assert.ok(rerun.rows[0].findings.some(f=>f.code==='negation_comparison_abstain'));
 });
