@@ -3,6 +3,7 @@ import {
   isVisible, canDecide, buildTaskPackage, parsePackage, importPackage, buildSubmission, setVerdict, buildReview,
   teamSummary, approvedDecisions, restoreWorkspace, exportTeam, caseFromFinding, isTeamCase, supervisedReviewers, stageOf, cleanName,
 } from './team-workflow.mjs';
+import {teamSoloDecisionNotice} from './review-state.mjs';
 
 /** First-strong isolation so Latin names, digits or brackets never reorder the Arabic sentence. */
 const iso = value => `\u2068${value}\u2069`;
@@ -161,7 +162,7 @@ export function createTeamWorkspace({getState, notify, download, onChange}) {
     const head = add(panel, 'div', null, 'team-roadmap-head');
     const title = add(head, 'h2', 'فريق المراجعة'); title.id = 'team-title'; title.tabIndex = -1;
     add(head, 'span', 'المرحلة الثانية من التطوير · غير مفعّلة افتراضيًا', 'team-stage-tag');
-    add(panel, 'p', 'للجهات التي تراجع كفريق: المدير يوزّع الحالات، المدقق يقرر في حالاته فقط، المشرف يوافق أو يعيد مع ملاحظة. العمل الفردي الحالي لا يتغير.', 'team-note');
+    add(panel, 'p', 'للجهات التي تراجع كفريق: المدير يوزّع الحالات، المدقق يقرر في حالاته فقط، المشرف يوافق أو يعيد مع ملاحظة. قراراتك الفردية المحفوظة تبقى محفوظة، لكنها لا تُحتسب في أرقام وضع الفريق حتى تنهيه.', 'team-note');
     const open = button(panel, 'تفعيل المعاينة التجريبية', 'button plain small', 'team-preview-on');
     open.onclick = () => setPreview(true);
     add(panel, 'p', 'معاينة تعمل على هذا الجهاز ومختبرة آليًا، ولم تُجرَّب بعد مع فريق حقيقي.', 'field-hint');
@@ -179,7 +180,9 @@ export function createTeamWorkspace({getState, notify, download, onChange}) {
     button(row, 'أنشئ فريقًا كمدير', 'button secondary', 'team-create').onclick = () => {
       const result = createManagerWorkspace({runKey, managerName:name.value, runInfo});
       if (result.error) { notify(result.error.message, true); markInvalid(name, result.error.message); return; }
-      commit(result.workspace, 'أُنشئ الفريق. أضف المدققين والمشرفين ثم وزّع الحالات.');
+      // Solo decisions are not counted in team mode: say so now instead of letting the numbers drop silently.
+      const solo = teamSoloDecisionNotice(Object.keys(getState().decisions ?? {}).length);
+      commit(result.workspace, `أُنشئ الفريق. أضف المدققين والمشرفين ثم وزّع الحالات.${solo ? ` ${solo}` : ''}`, Boolean(solo));
     };
     const input = fileInput(row, 'فتح ملف مهمة من المدير', 'team-task-file');
     input.onchange = () => readPackages(input);
@@ -202,6 +205,8 @@ export function createTeamWorkspace({getState, notify, download, onChange}) {
     const end = button(head, 'إنهاء وضع الفريق', 'text-button', 'team-end');
     end.onclick = () => { if (confirm('سيُحذف عمل الفريق من هذا المتصفح (الأعضاء والتوزيع والاعتمادات). نزّل التقرير أولًا إن احتجته. متابعة؟')) { ws = null; commit(null, 'انتهى وضع الفريق في هذا المتصفح. عدت للعمل وحدك.'); } };
     const summary = teamSummary(ws, caseFingerprints());
+    const soloNotice = teamSoloDecisionNotice(Object.keys(getState().decisions ?? {}).length);
+    if (soloNotice) add(panel, 'p', soloNotice, 'field-hint team-solo-note');
     stageBar(panel, summary);
     const steps = add(panel, 'ol', null, 'team-steps');
     for (const text of ['أضف الأعضاء', 'وزّع الحالات', 'نزّل ملف المهمة لكل عضو وأرسله', 'استلم ملفات الموافقة وادمجها']) add(steps, 'li', text);
