@@ -3,6 +3,7 @@ import {verifiedStoredZip} from './xlsx-secure-zip.mjs';
 const browser = typeof globalThis.postMessage === 'function' && typeof globalThis.document === 'undefined';
 const port = browser ? null : (await import('node:worker_threads')).parentPort;
 if (!browser && !port) throw new Error('Excel parsing must run inside a worker.');
+const UNREADABLE_WORKBOOK = 'ملف XLSX ليس أرشيف Excel صالحًا أو يحتوي أحجامًا غير متسقة. أعد حفظه بصيغة XLSX في Excel أو LibreOffice.';
 const send = value => browser ? globalThis.postMessage(value) : port.postMessage(value);
 const receive = async ({buffer, sheetName}) => {
   try {
@@ -10,7 +11,12 @@ const receive = async ({buffer, sheetName}) => {
     const verified = await verifiedStoredZip(buffer, {onProgress: value => send({kind: 'progress', value})});
     send({kind: 'progress', value: {phase: 'reading-sheet', completed: 0, total: 1, message: 'قراءة ورقة Excel في عامل منفصل'}});
     const XLSX = await import('../vendor/xlsx-0.20.3.mjs');
-    const workbook = XLSX.read(verified, {type: 'array', cellFormula: false, cellHTML: false, cellNF: false, sheetRows: 20002});
+    let workbook;
+    try { workbook = XLSX.read(verified, {type: 'array', cellFormula: false, cellHTML: false, cellNF: false, sheetRows: 20002}); }
+    catch (error) {
+      // The vendor library reports unreadable archives in English (for example "Unsupported ZIP file"); show the user the Arabic wording.
+      throw /[\u0600-\u06FF]/.test(String(error?.message ?? '')) ? error : new Error(UNREADABLE_WORKBOOK);
+    }
     const sheetNames = workbook.SheetNames;
     if (!Array.isArray(sheetNames) || !sheetNames.length) throw new Error('لا توجد ورقة Excel قابلة للقراءة.');
     const selected = sheetName ?? sheetNames[0], sheet = workbook.Sheets[selected];

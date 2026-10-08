@@ -7,16 +7,48 @@ const aliases = {
   surah: ['surah', 'sura', 'chapter', 'chapternumber', 'surahnumber', 'سورة', 'السورة', 'رقمالسورة'],
   ayah: ['ayah', 'aya', 'verse', 'versenumber', 'ayahnumber', 'آية', 'الآية', 'رقمالآية'],
   translation: ['translation', 'text', 'translatedtext', 'translationtext', 'ترجمة', 'الترجمة', 'النص', 'نصالترجمة'],
-  verseId: ['id', 'verseid', 'ayahid', 'معرف', 'معرفالآية'],
+  verseId: ['id', 'verseid', 'ayahid', 'versekey', 'ayahkey', 'معرف', 'معرفالآية'],
 };
 const aliasSets = Object.fromEntries(Object.entries(aliases).map(([key, values]) => [key, new Set(values.map(normalize))]));
 
-export function parseDelimited(text, delimiter) {
-  text = String(text).replace(/^\uFEFF/, '');
-  if (!delimiter) {
-    const line = text.split(/\r?\n/, 1)[0];
-    delimiter = [',', '\t', ';', '|'].sort((a, b) => line.split(b).length - line.split(a).length)[0];
+// The Arabic comma is only ever chosen for a file that visibly has the surah/ayah/translation layout (see detectDelimiter).
+const ARABIC_COMMA = '\u060C';
+const DELIMITER_CANDIDATES = [',', '\t', ';', '|', ARABIC_COMMA];
+const DELIMITER_SAMPLE_ROWS = 10;
+const isBlankRecord = record => record.every(value => !String(value ?? '').trim());
+// A first row that is recognisably a header (two or more known column roles) or a headerless "surah, ayah, text" row.
+function looksLikeTableStart(cells) {
+  const roles = Object.values(aliasSets).filter(set => cells.some(value => set.has(normalize(value)))).length;
+  if (roles >= 2) return true;
+  return cells.length >= 3 && /^\d+$/.test(asciiDigits(cells[0])) && /^[\d\u0660-\u0669\u06F0-\u06F9-]+$/.test(String(cells[1] ?? '').trim());
+}
+// Chooses the delimiter whose cell count is the same over the first rows, reading quotes the way the parser does.
+// Header and data rows both count, so a delimiter that only occurs inside free text (commas in a sentence) is not
+// consistent and loses. Ties go to a delimiter that fits a known column layout, then to the wider table, then to the
+// order , tab ; | . When nothing is consistent the old first-line count decides, so malformed files fail as they did.
+function detectDelimiter(text) {
+  const eligible = [];
+  DELIMITER_CANDIDATES.forEach((candidate, priority) => {
+    let sample;
+    try { sample = parseDelimited(text, candidate, 40).filter(record => !isBlankRecord(record)).slice(0, DELIMITER_SAMPLE_ROWS); }
+    catch { return; }
+    const width = sample[0]?.length ?? 0;
+    if (width < 2 || sample.some(record => record.length !== width)) return;
+    const fitsLayout = looksLikeTableStart(sample[0]);
+    if (candidate === ARABIC_COMMA && !fitsLayout) return;
+    eligible.push({candidate, priority, width, fitsLayout});
+  });
+  if (eligible.length) {
+    eligible.sort((a, b) => Number(b.fitsLayout) - Number(a.fitsLayout) || b.width - a.width || a.priority - b.priority);
+    return eligible[0].candidate;
   }
+  const line = text.split(/\r\n|\n|\r/).find(value => value.trim()) ?? '';
+  return [',', '\t', ';', '|'].sort((a, b) => line.split(b).length - line.split(a).length)[0];
+}
+
+export function parseDelimited(text, delimiter, sampleRows = Infinity) {
+  text = String(text).replace(/^\uFEFF/, '');
+  if (!delimiter) delimiter = detectDelimiter(text);
   const records = [];
   let record = [], field = '', quoted = false, endedQuote = false;
   const finishField = () => { record.push(field); field = ''; endedQuote = false; };
@@ -38,6 +70,8 @@ export function parseDelimited(text, delimiter) {
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && text[i + 1] === '\n') i++;
       finishRow();
+      // Delimiter detection only needs the first rows; a normal parse reads everything.
+      if (records.length >= sampleRows) return records;
     } else {
       if (endedQuote && !/\s/.test(c)) throw new Error('بنية CSV غير صحيحة بعد إغلاق علامات الاقتباس.');
       if (!endedQuote) field += c;
@@ -49,8 +83,20 @@ export function parseDelimited(text, delimiter) {
   return records;
 }
 
+// Blank lines before the header row (an exported title gap, a stray newline) are skipped and counted; a file made only
+// of blank rows keeps its old error.
+function leadingBlankRows(matrix) {
+  let count = 0;
+  while (count < matrix.length && isBlankRecord(matrix[count] ?? [])) count++;
+  return count === matrix.length ? 0 : count;
+}
+
+const withoutLeadingBlankRows = matrix => matrix.slice(leadingBlankRows(matrix));
+
 export function rowsFromMatrix(matrix, mapping) {
   if (!matrix.length) throw new Error('الملف فارغ.');
+  const lead = leadingBlankRows(matrix);
+  if (lead) matrix = matrix.slice(lead);
   const first = matrix[0].map(value => String(value ?? '').trim());
   const indexes = {};
   for (const [key, values] of Object.entries(aliasSets)) {
@@ -64,6 +110,7 @@ export function rowsFromMatrix(matrix, mapping) {
   if (mapping && Object.values(indexes).some(index => index >= first.length || index < -1)) throw new Error('رقم عمود الربط خارج أعمدة الملف.');
   let offset = 1;
   const warnings = [];
+  if (lead) warnings.push(`تم تجاوز ${lead} من الصفوف الفارغة قبل صف العناوين.`);
   // Auto-detected separate surah and ayah columns win over a plain `id` column (a row counter or database key)
   // unless that column really holds surah:ayah values.
   if (mapping?.verseId == null && indexes.verseId >= 0 && indexes.surah >= 0 && indexes.ayah >= 0) {
@@ -84,21 +131,21 @@ export function rowsFromMatrix(matrix, mapping) {
   for (let i = offset; i < matrix.length; i++) {
     const item = matrix[i];
     if (item.every(value => !String(value ?? '').trim())) continue;
-    if (item.length !== first.length) throw new Error(`عدد الخلايا في الصف ${i + 1} لا يطابق عناوين الأعمدة. قد يكون هناك فاصل غير مقتبس داخل النص.`);
+    if (item.length !== first.length) throw new Error(`عدد الخلايا في الصف ${i + 1 + lead} لا يطابق عناوين الأعمدة. قد يكون هناك فاصل غير مقتبس داخل النص.`);
     if (item.length > 128) throw new Error('عدد أعمدة الملف يتجاوز 128.');
     let surah = item[indexes.surah], ayah = item[indexes.ayah];
     if (indexes.verseId >= 0) {
       const id = asciiDigits(item[indexes.verseId]).trim();
       const match = id.match(/^(\d{1,3})[:/.](.+)$/);
-      if (match && ((indexes.surah >= 0 && asciiDigits(surah) && asciiDigits(surah) !== match[1]) || (indexes.ayah >= 0 && asciiDigits(ayah) && asciiDigits(ayah) !== match[2]))) throw new Error(`المعرّف المركب يتعارض مع رقمي السورة والآية في الصف ${i + 1}.`);
+      if (match && ((indexes.surah >= 0 && asciiDigits(surah) && asciiDigits(surah) !== match[1]) || (indexes.ayah >= 0 && asciiDigits(ayah) && asciiDigits(ayah) !== match[2]))) throw new Error(`المعرّف المركب يتعارض مع رقمي السورة والآية في الصف ${i + 1 + lead}.`);
       surah = match?.[1] ?? ''; ayah = match?.[2] ?? id;
     }
     const originalTranslation = item[indexes.translation];
     // Preserve a numeric/boolean spreadsheet value for the structural type check.
     // Revision evidence must preserve spaces, punctuation and combining marks exactly.
     const translation = originalTranslation ?? '';
-    if (typeof translation === 'string' && translation.length > MAX_TEXT) throw new Error(`النص في الصف ${i + 1} يتجاوز 20,000 حرف.`);
-    rows.push({surah: asciiDigits(surah), ayah: asciiDigits(ayah), translation, rowNumber: i + 1});
+    if (typeof translation === 'string' && translation.length > MAX_TEXT) throw new Error(`النص في الصف ${i + 1 + lead} يتجاوز 20,000 حرف.`);
+    rows.push({surah: asciiDigits(surah), ayah: asciiDigits(ayah), translation, rowNumber: i + 1 + lead});
   }
   if (!rows.length) throw new Error('لا توجد صفوف بيانات قابلة للفحص.');
   if (rows.length > MAX_ROWS) throw new Error('الملف يتجاوز 20,000 صف.');
@@ -125,7 +172,11 @@ export function parseXML(text, Parser = globalThis.DOMParser) {
     const translation = element.getAttribute('translation') ?? element.getAttribute('text') ?? element.querySelector('translation, text')?.textContent ?? element.textContent;
     matrix.push([surah, ayah, translation]);
   }
-  return rowsFromMatrix(matrix);
+  const parsed = rowsFromMatrix(matrix);
+  // A bare list of aya elements has no surah to read; say so once instead of letting every row fail later.
+  const withoutSurah = parsed.rows.filter(row => !row.surah).length;
+  if (withoutSurah) parsed.warnings.push(`${withoutSurah} من ${parsed.rows.length} عنصرًا في XML بلا رقم سورة (لا سمة surah ولا عنصر sura/surah/chapter يحيط بها)، فلن تُطابق أي آية. أضف رقم السورة ثم أعد الرفع.`);
+  return parsed;
 }
 
 export {validateZipBudget} from './xlsx-secure-zip.mjs';
@@ -198,8 +249,15 @@ export async function parseTranslationFile(file, options = {}) {
     const {matrix, sheetName} = result;
     sheetNames = result.sheetNames;
     abortImport(options.signal);
-    if (options.preview) return {matrix, headers: matrix[0] ?? [], sample: matrix.slice(1,4), fileName:file.name, format, sha256, sheetNames};
-    parsed = rowsFromMatrix(matrix, options.mapping);
+    if (options.preview) { const shown = withoutLeadingBlankRows(matrix); return {matrix: shown, headers: shown[0] ?? [], sample: shown.slice(1,4), fileName:file.name, format, sha256, sheetNames}; }
+    try { parsed = rowsFromMatrix(matrix, options.mapping); }
+    catch (error) {
+      // Only the first sheet is read; when its columns are not recognised, say which sheet it was and that others exist.
+      if (sheetNames.length > 1 && !options.sheetName && /لم أتعرف على الأعمدة|عناوين أعمدة/.test(error.message)) {
+        throw new Error(`${error.message} يحتوي الملف ${sheetNames.length} أوراق، وقد قُرئت الورقة الأولى «${sheetName}» فقط؛ إن كانت الترجمة في ورقة أخرى فانقلها إلى الورقة الأولى أو احفظها في ملف مستقل.`);
+      }
+      throw error;
+    }
     if (sheetNames.length > 1 && !options.sheetName) parsed.warnings.push(`تمت قراءة الورقة الأولى «${sheetName}» فقط. انقل بيانات الترجمة إليها أو اختر ملفًا بورقة واحدة.`);
   } else {
     let text;
@@ -208,7 +266,7 @@ export async function parseTranslationFile(file, options = {}) {
     if (format === 'xml') parsed = parseXML(text);
     else {
       const matrix = parseDelimited(text, format === 'tsv' ? '\t' : undefined);
-      if (options.preview) return {matrix,headers:matrix[0]??[],sample:matrix.slice(1,4),fileName:file.name,format,sha256,sheetNames};
+      if (options.preview) { const shown = withoutLeadingBlankRows(matrix); return {matrix:shown,headers:shown[0]??[],sample:shown.slice(1,4),fileName:file.name,format,sha256,sheetNames}; }
       parsed = rowsFromMatrix(matrix,options.mapping);
     }
   }
