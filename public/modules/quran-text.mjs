@@ -37,14 +37,29 @@ export async function parseQuranDisplay(text) {
   });
 }
 
+/** A request that never answers must not leave the case window on "loading" forever. */
+export const QURAN_LOAD_TIMEOUT_MS = 20000;
+
 let loading;
-/** Loads once per page; a failed load can be retried on the next case. */
-export function loadQuranText(fetchImpl = globalThis.fetch) {
-  loading ??= Promise.resolve()
-    .then(() => fetchImpl(new URL(QURAN_DISPLAY.file, import.meta.url)))
-    .catch(() => { throw new Error('تعذّر الاتصال لتحميل ملف نص المصحف'); })
-    .then((response) => { if (!response.ok) throw new Error(`تعذّر تنزيل ملف نص المصحف (HTTP ${response.status})`); return response.text(); })
-    .then(parseQuranDisplay)
-    .catch((error) => { loading = undefined; throw error; });
+/** Loads once per page; a failed or timed-out load can be retried on the next case. */
+export function loadQuranText(fetchImpl = globalThis.fetch, { timeoutMS = QURAN_LOAD_TIMEOUT_MS } = {}) {
+  if (!loading) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller?.abort();
+        reject(new Error(`انتهت مهلة تحميل ملف نص المصحف (${Math.round(timeoutMS / 1000)} ثانية)`));
+      }, timeoutMS);
+    });
+    const load = Promise.resolve()
+      .then(() => fetchImpl(new URL(QURAN_DISPLAY.file, import.meta.url), controller ? { signal: controller.signal } : undefined))
+      .catch(() => { throw new Error('تعذّر الاتصال لتحميل ملف نص المصحف'); })
+      .then((response) => { if (!response.ok) throw new Error(`تعذّر تنزيل ملف نص المصحف (HTTP ${response.status})`); return response.text(); })
+      .then(parseQuranDisplay);
+    loading = Promise.race([load, timeout])
+      .finally(() => clearTimeout(timer))
+      .catch((error) => { loading = undefined; throw error; });
+  }
   return loading;
 }
