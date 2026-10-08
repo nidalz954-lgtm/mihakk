@@ -60,6 +60,7 @@ const CARDINAL_AR = new Map([
   ['خمسون',50],['خمسين',50],['ستون',60],['ستين',60],['سبعون',70],['سبعين',70],['ثمانون',80],['ثمانين',80],['تسعون',90],['تسعين',90],
   ['مئة',100],['مائة',100],['ألف',1000],['الف',1000],
 ]);
+const ARTICLE_SCALE_EN = new Map([['hundred',100n],['thousand',1000n]]);
 const UNSUPPORTED_CARDINAL_EN = new Set(['half','halves','quarter','quarters','dozen','million','millions','billion','billions','trillion','trillions']);
 const UNSUPPORTED_CARDINAL_AR = new Set(['أحد','احد','إحدى','احدى','اثنا','اثني','اثنتا','اثنتي','نصف','ثلث','ربع','مليون','ملايين','مليار','مليارات']);
 const QUANTITY_UNITS = new Map();
@@ -155,7 +156,7 @@ function numericInventory(text,language) {
     // Identifiers such as A12 are one word token. 12A, .5, time/date/range
     // syntax and unsupported numeric compositions are explicit abstentions.
     if (previous && previous.end === first.start && /[\p{L}/:\-\.]/u.test(previous.text)) problem('adjacent_identifier_or_compound_syntax',first);
-    let last = index, numeric;
+    let last = index, numeric, article = null;
     if (digitQuantity(first)) numeric = literalQuantity(first.text);
     else {
       while (last+1 < items.length) {
@@ -165,6 +166,10 @@ function numericInventory(text,language) {
         break;
       }
       numeric = writtenQuantity(items.slice(index,last+1),language);
+      // "a hundred" / "a thousand" (English): the article stands for one. Only the bare two-word form; longer forms still abstain.
+      if (numeric.reason && last === index && (language === 'en' || !language) && ARTICLE_SCALE_EN.has(first.value) && previous?.value === 'a') {
+        numeric = rational(ARTICLE_SCALE_EN.get(first.value)); article = previous;
+      }
     }
     if (numeric.reason) problem(numeric.reason,{...first,end:items[last].end,text:text.slice(first.start,items[last].end)});
     const next = items[last+1], following = items[last+2];
@@ -172,9 +177,11 @@ function numericInventory(text,language) {
     if (next && (next.value === 'and' || next.value === 'و') && numberLike(following,language)) problem('separate_numeric_conjunction_ambiguous',next);
     if (next && ((['/',':','-','–','—'].includes(next.value) && !(next.value==='-'&&QUANTITY_UNITS.has(following?.value))) || (digitQuantity(next) && next.start === items[last].end))) problem('fraction_range_date_or_time_not_supported',next);
     if (next && next.start === items[last].end && /^[\p{L}]/u.test(next.text) && !QUANTITY_UNITS.has(next.value) && !unsupportedQuantityUnit(next.value)) problem('adjacent_identifier_or_compound_syntax',next);
-    if (previous && APPROXIMATE_QUANTITY.has(previous.value)) problem('approximate_quantity_not_exact',previous);
-    const prior=items.slice(Math.max(0,index-3),index).map(token=>token.value).join(' ');
-    if (/(?:at least|at most|more than|less than|between|على الأقل|على الاقل|أكثر من|اكثر من|أقل من|اقل من)$/.test(prior) || ['<','>','≤','≥'].includes(previous?.value)) problem('bounded_quantity_not_exact',previous??first);
+    // Words before the whole number phrase (the article of "a hundred" belongs to the phrase).
+    const phraseStart = article ? index-1 : index, lead = items[phraseStart-1];
+    if (lead && APPROXIMATE_QUANTITY.has(lead.value)) problem('approximate_quantity_not_exact',lead);
+    const prior=items.slice(Math.max(0,phraseStart-3),phraseStart).map(token=>token.value).join(' ');
+    if (/(?:at least|at most|more than|less than|between|على الأقل|على الاقل|أكثر من|اكثر من|أقل من|اقل من)$/.test(prior) || ['<','>','≤','≥'].includes(lead?.value)) problem('bounded_quantity_not_exact',lead??first);
     let unitToken = next;
     if (next?.value === '-' && QUANTITY_UNITS.has(following?.value)) unitToken = following;
     const unit = QUANTITY_UNITS.get(unitToken?.value);
@@ -184,8 +191,8 @@ function numericInventory(text,language) {
     if (unit && afterUnit && (['/','^','²','³'].includes(afterUnit.value) || (digitQuantity(afterUnit) && afterUnit.start === unitToken.end))) problem('compound_or_power_unit_not_supported',afterUnit);
     if (!numeric.reason) {
       const amount = rational(numeric.numerator*(unit?.numerator??1n),numeric.denominator*(unit?.denominator??1n));
-      const end = unit ? unitToken.end : items[last].end;
-      quantities.push({dimension:unit?.dimension??'unitless',numerator:amount.numerator.toString(),denominator:amount.denominator.toString(),start:first.start,end,text:text.slice(first.start,end),unit:unitToken && unit ? unitToken.text : null});
+      const end = unit ? unitToken.end : items[last].end, begin = (article ?? first).start;
+      quantities.push({dimension:unit?.dimension??'unitless',numerator:amount.numerator.toString(),denominator:amount.denominator.toString(),start:begin,end,text:text.slice(begin,end),unit:unitToken && unit ? unitToken.text : null});
     }
     index = last;
   }
@@ -443,6 +450,11 @@ export function auditBatch({ rows, referenceRows = [], scope = { type: 'full' },
         'No signal does not certify accuracy, completeness of meaning, or religious approval.',
         'Reference authority and licensing are supplied by the user and not authenticated by this engine.',
         'Structural coverage uses the declared 6,236-verse numbering convention.',
+        'Known blind spots: quantities are compared as a set and are not bound to the entities they count, so swapping two quantities between subjects (for example "five men and seven women" versus "seven men and five women") gives no signal.',
+        'Known blind spots: negation markers are a short bounded list (Arabic and English); negating pronouns and prefixes such as English "nothing", "nobody", "none" or Arabic "غير" are not markers, so "something" changed to "nothing" gives no signal.',
+        'Known blind spots: Arabic written numbers support single cardinal words only, so Arabic compound hundreds (for example ثلاثمائة versus أربعمائة) are not read as quantities and appear at most as a generic lexical difference; English supports "a hundred" and "a thousand" but not compounds such as "a hundred and five".',
+        'Known blind spots: quantifier, modality, permission and order markers (all, some, must, may, allowed, forbidden, before, after) exist for English only; Arabic quantifiers such as كل and بعض are not compared, and a replaced content word (for example Monday for Sunday) is at most a generic lexical difference.',
+        'The declared language is not verified: text in another language declared as English is checked with the English rules.',
       ],
     },
   };

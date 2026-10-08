@@ -258,3 +258,53 @@ test('BUG-07: prefixed live references no longer make every row a numeric change
   assert.equal(numeric.length, 1, 'only the genuinely changed number is flagged');
   assert.deepEqual(numeric[0].verseIds, ['2:6']);
 });
+
+// ---------------------------------------------------------------- BUG-32
+const numericCodes = (report) => report.findings.filter((finding) => /numeric/.test(finding.code)).map((finding) => finding.code);
+
+test('BUG-32: "a thousand" against "a hundred" is a numeric change, not only an abstention', () => {
+  const report = pair('They may live a thousand years.', 'They may live a hundred years.');
+  assert.ok(codes(report).includes('potential_numeric_change'));
+  assert.ok(!codes(report).includes('numeric_comparison_abstain'));
+  const finding = report.findings.find((item) => item.code === 'potential_numeric_change');
+  assert.equal(report.rows[0].status, 'needs_review');
+  assert.deepEqual(finding.evidence.referenceQuantities.map((quantity) => quantity.numerator), ['1000']);
+  assert.deepEqual(finding.evidence.candidateQuantities.map((quantity) => quantity.numerator), ['100']);
+  assert.deepEqual(finding.spans.map((span) => span.text).sort(), ['a hundred', 'a thousand']);
+});
+
+test('BUG-32: "a hundred" equals "one hundred" and "100"; compound and bounded forms still abstain', () => {
+  for (const other of ['They waited one hundred years.', 'They waited 100 years.', 'They waited a hundred years.']) {
+    assert.deepEqual(numericCodes(pair('They waited a hundred years.', other)), [], other);
+  }
+  assert.deepEqual(numericCodes(pair('They waited a thousand years.', 'They waited 1000 years.')), []);
+  // Not exact quantities: the article rule must not turn these into confident numbers.
+  for (const text of ['They waited about a hundred years.', 'They waited at least a hundred years.', 'They waited more than a hundred years.', 'They waited a hundred and five years.', 'They waited a hundred thousand years.']) {
+    const report = pair(text, 'They waited seven years.');
+    assert.ok(!codes(report).includes('potential_numeric_change'), text);
+    assert.ok(codes(report).includes('numeric_comparison_abstain'), text);
+  }
+});
+
+test('BUG-32: the machine-readable limitations list the verified blind spots of the rule families', () => {
+  const report = pair('He arrived on Monday.', 'He arrived on Sunday.');
+  const text = report.provenance.analysis.limitations.join('\n');
+  assert.match(text, /not bound to the entities/);
+  assert.match(text, /nothing/i);
+  assert.match(text, /Arabic.*hundreds/i);
+  assert.match(text, /Arabic.*quantifier/i);
+  assert.match(text, /declared language is not verified/i);
+  // Existing entries stay in place.
+  assert.ok(report.provenance.analysis.limitations.some((line) => /No signal does not certify accuracy/.test(line)));
+});
+
+test('BUG-32: the verified blind spots really are blind (kept honest by this test)', () => {
+  // Quantities are compared as a set, not bound to the things counted.
+  assert.equal(pair('Five men and seven women came.', 'Seven men and five women came.').rows[0].status, 'no_signal');
+  // Negating pronouns are outside the negation list.
+  assert.equal(pair('Something was left in the room.', 'Nothing was left in the room.').rows[0].status, 'no_signal');
+  // Arabic compound hundreds and quantifiers are not interpreted: at most a generic lexical difference.
+  assert.ok(!codes(pair('جاء ثلاثمائة رجل', 'جاء أربعمائة رجل', 'ar')).includes('potential_numeric_change'));
+  assert.ok(!codes(pair('جاء كل الرجال', 'جاء بعض الرجال', 'ar')).includes('potential_qualifier_change'));
+  assert.equal(pair('هو حاضر في البيت', 'هو غير حاضر في البيت', 'ar').rows[0].status, 'no_signal');
+});
