@@ -159,3 +159,14 @@ test('BUG-34: XML elements without any surah are reported once instead of failin
   const complete = parseXML('<root/>', fakeXml([{ attrs: { sura: '1', ayah: '1' }, text: 'Authored one' }]));
   assert.deepEqual(complete.warnings, []);
 });
+
+test('BUG-33: blank rows before the header of an Excel sheet are skipped like in CSV', async () => {
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([[], [], ['surah', 'ayah', 'translation'], [2, 5, 'Authored five']]), 'Sheet');
+  const file = new File([XLSX.write(book, { type: 'array', bookType: 'xlsx', compression: true })], 'blank-first.xlsx');
+  const result = await parseTranslationFile(file);
+  assert.deepEqual(plain(result), [['2', '5', 'Authored five']]);
+  assert.equal(result.rows[0].rowNumber, 4);
+  const preview = await inspectTranslationFile(file);
+  assert.deepEqual(preview.headers, ['surah', 'ayah', 'translation']);
+});
