@@ -333,7 +333,7 @@ function withdrawDecision(){
 /** Erase every saved decision of this review (including earlier ones not applied) after an explicit confirmation. */
 function clearAllDecisions(){
   const applied=Object.keys(state.decisions).length,kept=Object.keys(state.unappliedDecisions).length;if(!applied&&!kept||teamWorkspace.active())return;
-  if(!confirm(`سيُمسح ${number(applied)} قرارًا مطبّقًا${kept?` و${number(kept)} قرارًا سابقًا لم يُطبَّق`:''} مع أسبابها من هذا المتصفح، ولا يمكن التراجع. نزّل التقرير أولًا إن احتجتها. متابعة؟`))return;
+  if(!confirm(`سيُمسح كل ما حُفظ لهذه المراجعة من قرارات وأسبابها في هذا المتصفح، ولا يمكن التراجع. قرارات مطبّقة الآن: ${number(applied)}${kept?`، وقرارات سابقة لم تُطبَّق: ${number(kept)}`:''}. نزّل التقرير أولًا إن احتجتها. متابعة؟`))return;
   state.decisions={};state.unappliedDecisions={};state.unappliedCount=0;state.drafts={};state.draftDecision=null;
   let erased=Boolean(state.decisionKey);try{if(state.decisionKey){localStorage.removeItem(state.decisionKey);if(state.legacyDecisionKey)localStorage.removeItem(state.legacyDecisionKey);}}catch{erased=false;}
   renderFindings();teamWorkspace.refresh();if(state.step===4)renderDossier();
@@ -342,7 +342,7 @@ function clearAllDecisions(){
 /** Starting over drops decisions that exist only in this page; ask first when the browser could not keep them. */
 function confirmDiscardUnsavedDecisions(){
   const count=Object.keys(state.decisions).length;if(!count||state.demo||(state.decisionKey&&!state.storageFailed))return true;
-  return confirm(`عندك ${number(count)} قرارًا غير محفوظ في المتصفح لأن التخزين المحلي غير متاح، وسيضيع عند بدء فحص جديد. نزّل تقرير JSON أو CSV أولًا. هل تريد المتابعة دون حفظها؟`);
+  return confirm(`عندك ${arabicCount(count,{one:'قرار',two:'قراران',few:'قرارات',other:'قرارًا'})} غير محفوظ في المتصفح لأن التخزين المحلي غير متاح، وسيضيع عند بدء فحص جديد. نزّل تقرير JSON أو CSV أولًا. هل تريد المتابعة دون حفظها؟`);
 }
 function reportForExport(){
   const report=redactLiveReferenceText(state.report);
