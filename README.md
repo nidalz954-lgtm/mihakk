@@ -1,16 +1,16 @@
 # مِحَكّ — فرز مخاطر ملفات ترجمة معاني القرآن قبل مراجعة المختص
 
-الإصدار في هذا الفرع: **0.4.3-rc.1 — مرشح مراجعة بعد التسليم** · الترخيص: [MIT](LICENSE) للشفرة فقط · [المصادر والحقوق](SOURCE_AND_RIGHTS.md) · [إشعارات الطرف الثالث](THIRD_PARTY_NOTICES.md)
+الإصدار: **0.4.3 — إصلاحات صيانة بعد التسليم** · الترخيص: [MIT](LICENSE) للشفرة فقط · [المصادر والحقوق](SOURCE_AND_RIGHTS.md) · [إشعارات الطرف الثالث](THIRD_PARTY_NOTICES.md)
 
 مِحَكّ أداة فرز تساعد المراجع المختص. تفحص ملف الترجمة كاملًا وتُظهر الحالات التي تحتاج نظرًا، مع نصّها ودليلها ومصدرها. **لا تترجم، ولا تُفتي، ولا تُصدر شهادة، والقرار للمختص.** غياب الإشارة لا يعني أن المعنى صحيح. ملف المتابعة وتقرير JSON يصرّحان بأنهما ليسا شهادة ولا إذن نشر.
 
-هذه نسخة مراجعة أُعدّت يوم 8 أكتوبر 2026 من إصلاحات Claude Code وOpenAI Codex بعد التسليم. تُراجع على فرع مستقل؛ رفعها للمراجعة لا يغيّر تلقائيًا `main` أو رابط GitHub Pages، ولا يعني موافقة المنظم على تحديث النسخة المقدمة. لم يتلقَّ المؤسس إذنًا بذلك وقت إعداد هذا السجل. راجع [سجل المراجعة المؤرخ وحدود التحقق](docs/POST_SUBMISSION_REVIEW_2026-10-08.md).
+أُعدّ الإصدار 0.4.3 يوم 8 أكتوبر 2026 من إصلاحات Claude Code وOpenAI Codex بعد التسليم. بدأ بفرع مراجعة، ثم أذن المؤسس صراحة بنشر الإصلاحات على رابط الموقع الحالي. هذا تفويض مالك المشروع، ولم يتلقَّ إذن المنظم باستبدال النسخة المقدمة. راجع [سجل المراجعة المؤرخ وحدود التحقق](docs/POST_SUBMISSION_REVIEW_2026-10-08.md).
 
 طُوِّر المشروع بمساعدة أدوات برمجة بالذكاء الاصطناعي بتوجيه المؤسس. المراجعات المذكورة أجراها وكلاء ذكاء اصطناعي، وليست لجنة بشرية ولا مراجعة مستقلة من جهة خارج الفريق. **لم يراجع المنتج أي مختص شرعي أو لغوي بشري بعد.** العمل السابق للتحدي موثّق في [BASELINE.md](BASELINE.md)، وتسلسل التغييرات في [CHANGELOG.md](CHANGELOG.md) و[الإفصاح](docs/AI_DISCLOSURE_AR.md).
 
 ## التشغيل
 
-- [رابط النسخة المنشورة](https://nidalz954-lgtm.github.io/mihakk/) مستقل عن مرشح المراجعة في هذا الفرع؛ لا يُفترض أنه يعرض إصلاحاته.
+- [رابط الموقع](https://nidalz954-lgtm.github.io/mihakk/)؛ لتأكيد الإصدار الذي يخدمه Pages راجع [build-info.json](https://nidalz954-lgtm.github.io/mihakk/build-info.json) وحالة النشر في GitHub Actions.
 - الوثائق: [دليل الاستخدام](docs/USER_GUIDE_AR.md) · [الحدود الحالية والتاريخية](docs/KNOWN_ISSUES.md) · [الأمن والخصوصية](SECURITY.md).
 - محليًا: Node.js 20.12 أو أحدث، بلا `npm install` وبلا مفاتيح:
 
@@ -66,4 +66,4 @@ node scripts/benchmark-injected.mjs
 
 ## English summary
 
-Mihakk is a browser-local triage tool for Quran-meaning translation files before expert review. It does not translate, issue rulings, or certify. This branch contains **0.4.3-rc.1**, a post-submission review candidate prepared with Claude Code and OpenAI Codex. It is separate from the published Pages version and is not organizer-authorized as a replacement submission. AI signals remain experimental. Reviews were performed by AI agents, not an independent human panel; no human religious or linguistic expert has validated the product. See the [dated review record](docs/POST_SUBMISSION_REVIEW_2026-10-08.md) for validation scope and limitations.
+Mihakk is a browser-local triage tool for Quran-meaning translation files before expert review. It does not translate, issue rulings, or certify. Version **0.4.3** is a post-submission maintenance release prepared with Claude Code and OpenAI Codex. The project owner explicitly authorized publication on the existing Pages URL. Organizer permission to replace the submitted version has not been received; the release does not claim such permission. AI signals remain experimental. Reviews were performed by AI agents, not an independent human panel; no human religious or linguistic expert has validated the product. See the [dated review record](docs/POST_SUBMISSION_REVIEW_2026-10-08.md) for validation scope and limitations.
