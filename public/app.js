@@ -1,5 +1,6 @@
 import { parseTranslationFile, inspectTranslationFile } from './modules/file-parser.mjs';
-import { auditBatch, generateDemoRows, generateDemoReferenceRows } from './modules/batch-engine.mjs';
+import { generateDemoRows, generateDemoReferenceRows } from './modules/batch-engine.mjs';
+import { runBatchReview } from './modules/batch-review.mjs';
 import { listReferenceBooks, fetchReferenceBookMetadata, fetchReferenceForRows, isLiveRetrievalResult } from './modules/reference-api.mjs';
 import { enrichReportWithAI, cancelSemanticAnalysis, MODEL as EMBEDDING_MODEL } from './modules/semantic-ai.mjs';
 import { verifyReferenceProvenance } from './modules/trust-protocol.mjs';
@@ -15,7 +16,7 @@ import { createRevisionWorkspace } from './modules/revision-ui.mjs';
 import { createTeamWorkspace } from './modules/team-ui.mjs';
 import { caseProgress, isUnresolvedSignal } from './modules/dossier.mjs';
 import { mergeRunHistory } from './modules/run-manifest.mjs';
-import { DECISION_STORE_PREFIX, LEGACY_DECISION_STORE_PREFIX, STORAGE_UNAVAILABLE_NOTE, STORE_REPAIRED_NOTE, reviewIdentityInput, loadDecisionStore, applyStoredDecisions, buildDecisionStore, localDateStamp, rowsInDeclaredScope, buildReviewCsvLines, serializeReportJSON, decisionProgressText, decisionMetricCaption, unappliedDecisionsNote } from './modules/review-state.mjs';
+import { DECISION_STORE_PREFIX, LEGACY_DECISION_STORE_PREFIX, STORAGE_UNAVAILABLE_NOTE, STORE_REPAIRED_NOTE, reviewIdentityInput, fileAwareDecisionInput, savedDecisionNotice, loadDecisionStore, applyStoredDecisions, buildDecisionStore, localDateStamp, rowsInDeclaredScope, buildReviewCsvLines, serializeReportJSON, decisionProgressText, decisionMetricCaption, unappliedDecisionsNote } from './modules/review-state.mjs';
 
 const $ = id => document.getElementById(id);
 const state = {candidate:null, reference:null, report:null, demo:false, busy:false, page:1, decisions:{}, decisionKey:'', decisionFingerprints:{}, activeFinding:null, draftDecision:null, books:[], booksLanguage:'', booksLoading:null, abort:null, cancelled:false,step:1,onlyUnresolved:false,modelCancelled:null,runManifest:null,runHistory:[],storageAvailable:true};
@@ -23,7 +24,7 @@ let revisionWorkspace=null,teamWorkspace=null;
 Object.assign(state,{drafts:{},unappliedDecisions:{},unappliedCount:0,legacyDecisionKey:'',storageIssue:'',storageFailed:false,resetDeclined:false});
 /** Decisions that count for this viewer: own ones alone, supervisor-approved ones for a team manager. */
 const currentDecisions=()=>teamWorkspace?teamWorkspace.effectiveDecisions(state.decisions):state.decisions;
-import { languageLimitsNotice, findingTitleOverride, normalizeSearchText, findingSearchText, rowlessFindingsText, displayFileName, withoutFinalStop, stopMessage, unverifiedEmbeddingNote, checklistStatusWord, missingVersePreview, nonTextCellNote, referenceDefects, referenceDefectLines } from './modules/ui-helpers.mjs';
+import { languageLimitsNotice, findingTitleOverride, normalizeSearchText, findingSearchText, rowlessFindingsText, displayFileName, withoutFinalStop, stopMessage, unverifiedEmbeddingNote, checklistStatusWord, missingVersePreview, nonTextCellNote, referenceDefects, referenceDefectLines, createOperationProgress, modelFailureNotice } from './modules/ui-helpers.mjs';
 import { strictInteger, isValidVerseId } from './modules/quran-index.mjs';
 const PAGE_SIZE = 12;
 const ROWS={zero:'صف',one:'صف',two:'صف',few:'صفوف',many:'صفًا',other:'صف'};
@@ -34,7 +35,7 @@ const decisionLabels = {accept:'تحتاج تصحيحاً',reject:'أغلق ال
 const formatter=new Intl.NumberFormat('ar');
 const number=value=>formatter.format(Number(value)||0);
 // Titles that must not contradict the case body (BUG-29), the engine's language-limits finding (BUG-02), and the non-text translation type (BUG-29).
-Object.assign(labels,{context_language_mismatch:'امتناع قبل النموذج بسبب كتابة النص',language_checks_limited:'فحوص النفي والأعداد لا تعمل لهذه اللغة',invalid_translation_type:'قيمة ترجمة غير نصية'});
+Object.assign(labels,{context_language_mismatch:'امتناع قبل النموذج بسبب كتابة النص',language_checks_limited:'قواعد لغوية غير متاحة لبعض الصفوف',language_rule_abstain:'امتناع جزئي عن قواعد لغة غير مدعومة',negation_comparison_abstain:'نطاق النفي المتكرر غير محسوم',potential_negation_count_change:'اختلاف عدد أدوات النفي يحتاج مراجعة؛ ليس حكمًا بتغير المعنى',invalid_translation_type:'قيمة ترجمة غير نصية'});
 const findingTitle=finding=>findingTitleOverride(finding)||labels[finding.code]||typeLabels[finding.type]||'حالة مراجعة';
 const searchCache=new WeakMap();
 const searchTextOf=finding=>{let text=searchCache.get(finding);if(text===undefined){text=findingSearchText(finding,{title:findingTitle(finding),location:findingLocation(finding)});searchCache.set(finding,text);}return text;};
@@ -72,8 +73,11 @@ function navigateStep(step){setStep(step);const title=$(['','upload-title','setu
 function lockDemoControls(){if(!state.busy)for(const id of ['candidate-name','candidate-language','scope-mode','scope-surah','reference-mode','reference-book','reference-file','reference-language','source-title','source-author','source-publisher','source-edition','source-url','source-license','source-verified','remove-reference']){if($(id))$(id).disabled=state.demo;}updateAIChoice();}
 function sameLanguagePair(){const candidate=$('candidate-language').value;const reference=state.demo?'en':$('reference-mode').value==='upload'?$('reference-language').value:$('reference-mode').value==='live'?candidate:'';return MULTILINGUAL_CONTEXT_LANGUAGES.includes(candidate)&&reference===candidate;}
 function updateAIChoice(){const referenceLanguage=$('reference-mode').value==='upload'&&!state.demo?$('reference-language').value:'en';const english=$('candidate-language').value==='en'&&(!referenceLanguage||referenceLanguage==='en'),context=$('ai-mode').querySelector('[value="context"]');context.disabled=!english;if(!english&&$('ai-mode').value==='context')$('ai-mode').value='embedding';const multi=$('ai-mode').querySelector('[value="context-multi"]');if(multi){multi.disabled=!sameLanguagePair();if(multi.disabled&&$('ai-mode').value==='context-multi')$('ai-mode').value='embedding';}if($('ai-mode').value==='context-multi'){$('ai-size-note').textContent=`مؤشر تعارض سياقي تجريبي متعدد اللغات، لنصين بنفس اللغة المعلنة فقط (العربية، الإنجليزية، الفرنسية، الإندونيسية، التركية، الروسية، الإسبانية، الأردية): تنزيل أول مرة نحو ${MULTILINGUAL_NLI_MODEL.modelDownloadMB} ميغابايت، إضافة إلى ملفات المفردات والتشغيل، وهو أبطأ من النموذج الإنجليزي. ليس نسبة دقة، ولم يُختبر على ترجمات القرآن. لا يقارن الترجمة بالنص العربي للقرآن.`;return;}const model=$('ai-mode').value==='context'?NLI_MODEL:EMBEDDING_MODEL;$('ai-size-note').textContent=`${$('ai-mode').value==='context'?'مؤشر تعارض سياقي تجريبي، للإنجليزية المعلنة مع حاجز كتابة محافظ':'تشابه لغوي تجريبي؛ لا يعتمد عليه لكشف النفي أو انعكاس الأدوار'}: تنزيل أول مرة نحو ${model.modelDownloadMB} ميغابايت، إضافة إلى ملفات المفردات والتشغيل. ليس نسبة دقة. ${$('ai-mode').value==='context'?'الحروف اللاتينية لا تثبت أن اللغة إنجليزية؛ النص المختلط قد يُستبعد تحفظاً.':'لم يثبت كشف التغييرات الحاسمة بالتشابه وحده؛ يُعرض كخيار تجريبي منفصل.'}${$('ai-mode').value==='embedding'&&$('reference-mode').value==='upload'&&!state.demo?` ${unverifiedEmbeddingNote()}`:''}`;}
-function showProgress(message,progress=0){const first=$('processing').hidden;$('step-'+state.step).querySelector('.pane-heading').after($('processing'));$('processing').hidden=false;if(first)$('processing').scrollIntoView({block:'nearest',behavior:'instant'});$('progress-message').textContent=message;$('progress-bar').style.width=`${Math.max(0,Math.min(100,progress))}%`;const track=$('progress-track');track.setAttribute('aria-valuenow',String(Math.round(Math.max(0,Math.min(100,progress)))));track.setAttribute('aria-valuetext',message);}
+const operationProgress=createOperationProgress();
+window.addEventListener('pagehide',()=>{state.abort?.abort();state.modelCancelled?.();cancelSemanticAnalysis();cancelContextRisk();});
+function showProgress(message,progress=0){if(!state.busy)return;const shown=operationProgress.next(progress);const first=$('processing').hidden;$('step-'+state.step).querySelector('.pane-heading').after($('processing'));$('processing').hidden=false;if(first)$('processing').scrollIntoView({block:'nearest',behavior:'instant'});$('progress-message').textContent=message;$('progress-bar').style.width=`${shown}%`;const track=$('progress-track');track.setAttribute('aria-valuenow',String(Math.round(shown)));track.setAttribute('aria-valuetext',message);}
 function setBusy(busy){
+  if(busy&&!state.busy)operationProgress.reset();
   state.busy=busy;
   document.querySelectorAll('.workdesk input,.workdesk select,.workdesk button,.workflow button,#new-audit').forEach(element=>element.disabled=busy);
   $('run-audit').disabled=busy||!state.candidate;$('run-audit').textContent=busy?'جارٍ فحص الملف…':'أنشئ قائمة المراجعة ←';
@@ -92,7 +96,7 @@ function renderFileSummary(id,parsed,synthetic=false){
 }
 function clearDemo(){state.demo=false;$('demo-banner').hidden=true;const option=$('scope-mode').querySelector('[value="demo"]');if(option)option.remove();if($('scope-mode').value==='')$('scope-mode').value='provided';}
 async function readFile(file,reference=false,mapping){
-  if(!file||state.busy)return;if(reference&&state.demo){notify('المثال يستخدم مرجعه المؤلف فقط. اخرج من المثال لرفع ملفك المرجعي.',true);return;}const id=reference?'reference-summary':'candidate-summary';notify('جارٍ قراءة الملف داخل المتصفح…');
+  if(!file||state.busy)return;if(!confirmDiscardUnsavedDecisions()){ $(reference?'reference-file':'candidate-file').value='';return;}if(reference&&state.demo){notify('المثال يستخدم مرجعه المؤلف فقط. اخرج من المثال لرفع ملفك المرجعي.',true);return;}const id=reference?'reference-summary':'candidate-summary';notify('جارٍ قراءة الملف داخل المتصفح…');
   setBusy(true);state.operation='reading-file';state.cancelled=false;state.abort=new AbortController();showProgress('جارٍ قراءة الملف والتحقق من صيغته…',10);
   try{const parsed=await parseTranslationFile(file,{mapping,signal:state.abort.signal,onProgress:p=>showProgress(p.message||'جارٍ التحقق من الملف…',p.total?10+70*p.completed/p.total:20)});if(state.cancelled){notify('أُلغيت قراءة البديل؛ بقي الملف المقبول سابقاً كما هو.');return;}if(!parsed.rows?.length)throw new Error('لم نجد صفوفاً قابلة للفحص. راجع صيغة الأعمدة في نموذج CSV.');
     if(!reference){if(state.demo){state.reference=null;$('reference-mode').value='none';$('reference-setup').hidden=true;$('source-verified').checked=false;renderFileSummary('reference-summary',null);}clearDemo();state.candidate=parsed;$('candidate-name').value=displayFileName(file.name);}else{state.reference=parsed;if(!$('source-title').value)$('source-title').value=displayFileName(file.name);}
@@ -118,26 +122,27 @@ function uploadedReferenceMetadata(){
   return{title:$('source-title').value.trim()||state.reference?.fileName||'مرجع مرفوع من المستخدم',author:$('source-author').value.trim()||null,publisher:$('source-publisher').value.trim()||null,edition:$('source-edition').value.trim(),url:$('source-url').value.trim(),verificationStatus:'unverified',language:$('reference-language').value||'unknown',licenseNote:$('source-license').value.trim(),sourceKind:'user-upload',userAcknowledgedMetadata:$('source-verified').checked};
 }
 async function setupDecisionStorage(report){
-  state.unappliedDecisions={};state.unappliedCount=0;state.drafts={};state.storageIssue='';state.storageFailed=false;
+  state.unappliedDecisions={};state.unappliedCount=0;state.drafts={};state.storageIssue='';state.storageFailed=false;state.decisionKey='';state.legacyDecisionKey='';state.runKey='';state.decisionFingerprints={};state.decisions={};state.decisionStoreNeedsReload=false;state.legacyFingerprintMap={};state.withdrawnFingerprints=[];
   try{
     const reference=report.provenance.reference,analysis=report.provenance.analysis;
     const refHash=await digest(JSON.stringify(report.rows.filter(row=>row.reference).map(row=>[row.verseId,row.reference.translation])));
     const key=await digest(JSON.stringify({schema:report.schemaVersion,candidate:state.candidate.sha256,reference:refHash,scope:report.scope,language:report.provenance.candidate.language,mode:analysis.mode||analysis.analysisMode||$('ai-mode').value,contextModel:analysis.contextModel,embeddingModel:analysis.model,thresholds:analysis.thresholds||analysis.contextThresholds,referenceStatus:reference.verificationStatus,sourceKind:reference.sourceKind,book:reference.bookId,sourceTitle:reference.fullTitle||reference.title,edition:reference.edition,referenceLanguage:reference.language,author:reference.author||reference.translator||null,publisher:reference.publisher||null}));
     // The store is keyed by the review identity (scope, languages, reference), not by file hashes: editing one verse must not hide every saved decision.
-    // The per-case evidence fingerprint alone decides whether a saved decision still applies. runKey keeps the exact-file key the team workspace is bound to.
+    // Text cases follow their evidence; file-wide structural cases also require the exact candidate hash. runKey binds the team workspace to the exact file.
     const identity=await digest(JSON.stringify(reviewIdentityInput(report)));
     state.decisionKey=`${DECISION_STORE_PREFIX}${identity}`;state.legacyDecisionKey=`${LEGACY_DECISION_STORE_PREFIX}${key}`;state.runKey=key;state.decisionFingerprints={};state.decisions={};
-    for(const finding of report.findings)state.decisionFingerprints[finding.id]=await digest(decisionFingerprintInput(finding));
-    const loaded=loadDecisionStore(localStorage,{key:state.decisionKey,legacyKey:state.legacyDecisionKey});
+    const legacyFingerprintMap=state.legacyFingerprintMap={};
+    for(const finding of report.findings){const prior=await digest(decisionFingerprintInput(finding));const current=await digest(fileAwareDecisionInput(finding,state.candidate.sha256));state.decisionFingerprints[finding.id]=current;if(prior!==current)legacyFingerprintMap[prior]=current;}
+    const loaded=loadDecisionStore(localStorage,{key:state.decisionKey,legacyKey:state.legacyDecisionKey,legacyFingerprintMap});
     const applied=applyStoredDecisions(loaded.entries,state.decisionFingerprints);
     state.decisions=applied.decisions;state.unappliedDecisions=applied.unapplied;state.unappliedCount=applied.unappliedCount;
     if(loaded.repaired)state.storageIssue=STORE_REPAIRED_NOTE;
   }
-  catch{state.decisionKey='';state.legacyDecisionKey='';state.runKey='';state.decisionFingerprints={};state.decisions={};state.unappliedDecisions={};state.unappliedCount=0;state.storageIssue=STORAGE_UNAVAILABLE_NOTE;}
+  catch{state.decisions={};state.unappliedDecisions={};state.unappliedCount=0;state.decisionStoreNeedsReload=!!state.decisionKey;state.storageFailed=true;state.storageIssue=STORAGE_UNAVAILABLE_NOTE;}
 }
-function aiProgress(progress){if(typeof progress==='number')showProgress('جارٍ تحميل النموذج المحلي…',progress);else if(['inference','context-inference'].includes(progress?.status))showProgress(`النموذج يقارن ${number(progress.done)} من ${number(progress.total)} موضع…`,40+(Number(progress.progress)||0)*.55);else if(progress?.status==='progress')showProgress(`جارٍ تحميل النموذج المحلي… ${Math.round(Number(progress.progress)||0)}%`,20+(Number(progress.progress)||0)*.2);else if(progress?.status==='context-error')showProgress(`المؤشر السياقي غير مكتمل: ${progress.message}`,85);else showProgress('جارٍ تجهيز النموذج اللغوي في المتصفح…',25);}
+function aiProgress(progress){if(typeof progress==='number')showProgress('جارٍ تحميل النموذج المحلي…',45+Math.max(0,Math.min(100,progress))*.2);else if(['inference','context-inference'].includes(progress?.status))showProgress(`النموذج يقارن ${number(progress.done)} من ${number(progress.total)} موضع…`,65+(Number(progress.progress)||0)*.28);else if(progress?.status==='progress')showProgress(progress.message||`جارٍ تحميل النموذج المحلي… ${Math.round(Number(progress.progress)||0)}%`,45+(Number(progress.progress)||0)*.2);else if(progress?.status==='context-error')showProgress(`المؤشر السياقي غير مكتمل: ${progress.message}`,85);else showProgress('جارٍ تجهيز النموذج اللغوي في المتصفح…',45);}
 async function runAudit(){
-  if(!state.candidate||state.busy)return;let scope;try{scope=getScope();}catch(error){invalid('scope-surah',error.message);return;}
+  if(!state.candidate||state.busy)return;if(!confirmDiscardUnsavedDecisions())return;let scope;try{scope=getScope();}catch(error){invalid('scope-surah',error.message);return;}
   if(revisionWorkspace?.busy){notify('انتظر قراءة نسخة الأساس قبل الفحص.',true);return;}
   if(!revisionWorkspace.validate())return;
   const referenceMode=$('reference-mode').value,language=$('candidate-language').value,aiMode=$('ai-mode').value;
@@ -161,7 +166,7 @@ async function runAudit(){
         let sourceBook=book;
         try{showProgress('جارٍ قراءة سجل الكتاب وهوية الناشر من المصدر…',12);sourceBook=await fetchReferenceBookMetadata(book,{signal:state.abort.signal});}
         catch(error){bookRecordProblem=String(error?.message||'غير معروف').slice(0,200);referenceWarning=`تعذّر قراءة سجل هوية الكتاب: ${withoutFinalStop(error.message)}. ستبقى البيانات غير المعلنة ظاهرة كما هي.`;}
-        const preliminary=auditBatch({rows:state.candidate.rows,scope,metadata:{candidate:{name:state.candidate.fileName,language}}});
+        const preliminary=await runBatchReview({rows:state.candidate.rows,scope,metadata:{candidate:{name:state.candidate.fileName,language}}},{signal:state.abort.signal,onProgress:progress=>showProgress(progress.status==='complete'?'حُددت المواضع داخل النطاق المعلن.':'جارٍ تحديد مواضع الملف داخل النطاق المعلن…',progress.status==='complete'?11:10)});
         const rows=[...new Map(rowsInDeclaredScope(preliminary.rows).map(row=>[row.verseId,{surah:row.surah,ayah:row.ayah,rowNumber:row.rowNumber}])).values()];
         if(!rows.length)throw new Error('لا يوجد معرّف آية صالح لجلب مرجع.');
         const fetched=await fetchReferenceForRows({book:sourceBook,rows,signal:state.abort.signal,onProgress:progress=>showProgress(`جارٍ جلب المرجع: ${number(progress.completed)} من ${number(progress.total)} سورة…`,14+21*(progress.completed/Math.max(1,progress.total)))});
@@ -174,10 +179,22 @@ async function runAudit(){
     const provenanceCheck=await verifyReferenceProvenance({rows:referenceRows,metadata:referenceMetadata});referenceRows=provenanceCheck.rows;referenceMetadata=provenanceCheck.metadata;trustChecks=provenanceCheck.checks;
     if(liveRetrieval&&referenceMetadata.sourceKind==='quranpedia-api'){referenceMetadata.liveTransportVerified=true;for(const row of referenceRows){if(row.recordedProvenanceConsistent===true){row.allowNoSignal=true;row.trustedSourceProvenance=true;}}}
     showProgress('جارٍ ترتيب الحالات وربطها بصفوف الملف…',40);
-    let report=auditBatch({rows:state.candidate.rows,referenceRows,scope,metadata:{candidate:{name:$('candidate-name').value.trim()||state.candidate.fileName,language,synthetic:state.demo},reference:referenceMetadata,analysisMode:$('ai-enabled').checked?`${aiMode}-requested`:'structural-and-lexical-rules'}});
+    let report=await runBatchReview({rows:state.candidate.rows,referenceRows,scope,metadata:{candidate:{name:$('candidate-name').value.trim()||state.candidate.fileName,language,synthetic:state.demo},reference:referenceMetadata,analysisMode:$('ai-enabled').checked?`${aiMode}-requested`:'structural-and-lexical-rules'}},{signal:state.abort.signal,onProgress:progress=>showProgress(progress.status==='complete'?'اكتمل الفحص البنيوي واللفظي؛ جارٍ تجهيز الخطوات التالية…':'جارٍ فحص البنية والألفاظ في الخلفية…',progress.status==='complete'?44:40)});
     Object.assign(report.provenance.reference,referenceMetadata);report.provenance.referenceChecks=bookRecordProblem?[...trustChecks,{scope:'metadata',code:'book_record_unavailable',status:'warning',message:'تعذّرت قراءة سجل هوية الكتاب من المصدر؛ بيانات المؤلف والناشر والطبعة بقيت غير معلنة كما وردت في قائمة المصدر.',detail:bookRecordProblem}]:trustChecks;
     Object.assign(report.provenance.candidate,{fileName:state.candidate.fileName,sha256:state.candidate.sha256,format:state.candidate.format,parseWarnings:state.candidate.warnings||[]});if(referenceError)report.provenance.reference.retrievalError=referenceError;
-    if($('ai-enabled').checked&&!referenceError&&!state.cancelled){try{state.modelCancelled=CONTEXT_MODES.has(aiMode)?cancelContextRisk:cancelSemanticAnalysis;report=CONTEXT_MODES.has(aiMode)?await runContextRisk(report,aiProgress,{model:aiMode==='context-multi'?'multilingual':'en'}):await enrichReportWithAI(report,aiProgress);const inferred=CONTEXT_MODES.has(aiMode)?report.provenance.analysis.contextProcessedRows:report.provenance.analysis.semanticProcessedRows;if(!inferred)aiError=aiMode==='embedding'&&referenceMode==='upload'&&!state.demo?`لم يُشغَّل نموذج التشابه: ${unverifiedEmbeddingNote()} نتائج الفحص البنيوي واللفظي متاحة.`:'لم يُنفذ استدلال بنموذج: لا توجد أزواج مختلفة مؤهلة أو تعذّر تشغيل النموذج. نتائج الفحص البنيوي واللفظي متاحة.';if(report.provenance.analysis.contextError)aiError=`المؤشر السياقي غير مكتمل: ${withoutFinalStop(report.provenance.analysis.contextError)}. حُفظت المقارنات التي اكتملت.`;}catch(error){aiError=`تعذّر استكمال النموذج: ${withoutFinalStop(error.message)}. نتائج البنية والفروق اللفظية محفوظة.`;report.provenance.analysis.modelError=error.message;}finally{state.modelCancelled=null;}}
+    if($('ai-enabled').checked&&!referenceError&&!state.cancelled){
+      try{
+        state.modelCancelled=CONTEXT_MODES.has(aiMode)?cancelContextRisk:cancelSemanticAnalysis;
+        report=CONTEXT_MODES.has(aiMode)?await runContextRisk(report,aiProgress,{model:aiMode==='context-multi'?'multilingual':'en'}):await enrichReportWithAI(report,aiProgress);
+        const inferred=CONTEXT_MODES.has(aiMode)?report.provenance.analysis.contextProcessedRows:report.provenance.analysis.semanticProcessedRows;
+        if(!inferred)aiError=aiMode==='embedding'&&referenceMode==='upload'&&!state.demo?`لم يُشغَّل نموذج التشابه: ${unverifiedEmbeddingNote()} نتائج الفحص البنيوي واللفظي متاحة.`:'لم يُنفذ استدلال بنموذج: لا توجد أزواج مختلفة مؤهلة أو تعذّر تشغيل النموذج. نتائج الفحص البنيوي واللفظي متاحة.';
+        const modelFailure=modelFailureNotice(report.provenance.analysis,aiMode,{cancelledByUser:state.cancelled});
+        if(modelFailure)aiError=modelFailure;
+      }catch(error){
+        aiError=`تعذّر استكمال النموذج: ${withoutFinalStop(error.message)}. نتائج البنية والفروق اللفظية محفوظة.`;
+        if(!state.cancelled)report.provenance.analysis.modelError=error.message;
+      }finally{state.modelCancelled=null;}
+    }
     if(state.cancelled){const done=report.provenance.analysis;aiError=stopMessage({referenceFailed:Boolean(referenceError),aiRequested:$('ai-enabled').checked,aiProcessed:done.contextProcessedRows||done.semanticProcessedRows||0,aiEligible:done.contextEligibleRows||done.semanticEligibleRows||0,lexicalCompared:report.summary.lexicalComparedRows});}
     if($('ai-enabled').checked){if(state.cancelled)report.provenance.analysis.aiCancelled=true;else if(referenceError)report.provenance.analysis.aiSkippedReason='تعذّر الحصول على نص المرجع، فلم يُشغّل النموذج.';}
     showProgress('جارٍ توثيق التغطية وبصمات هذا التشغيل…',94);
@@ -188,9 +205,12 @@ async function runAudit(){
     showProgress('جارٍ تجهيز قائمة المراجعة…',98);await setupDecisionStorage(report);state.report=report;state.page=1;teamWorkspace.load(state.runKey,{candidateName:report.provenance.candidate.name,candidateSha256:state.candidate.sha256,referenceTitle:report.provenance.reference.title,analysis:report.provenance.analysis.requestedMode||report.provenance.analysis.mode||'',scope:report.scope});
     const revisionError=await revisionWorkspace.compare(scope,state.abort.signal);renderReport();renderRunManifest();setStep(3);
     const revisionWarning=revisionError?`لم تكتمل مقارنة النسخ (${({CANCELLED:'أُلغي الفحص',INPUT_LIMIT:'تجاوز حجم المدخلات',TEXT_LIMIT:'تجاوز طول النص',ROW_LIMIT:'تجاوز عدد الصفوف',COMPARISON_FAILED:'تعذّرت المقارنة',MODE_REQUIRES_DECLARATION:'يلزم تصريح مقارنة النسختين'})[revisionError.code]||'مدخلات المقارنة غير صالحة'}). بقي تقرير الفحص الأساسي فقط؛ صحح المدخلات أو أعد التشغيل. ${revisionError.code==='INPUT_LIMIT'?'حد المقارنة 10 MiB لمجموع النصوص والبيانات بعد القراءة.':''}`:'';
-    if(referenceError||referenceWarning||aiError||revisionWarning||state.storageIssue)notify((state.cancelled?[aiError,revisionWarning]:[referenceError,referenceWarning,aiError,revisionWarning,state.storageIssue]).filter(Boolean).join(' '),true);else notify(`اكتمل فحص ${arabicCount(report.summary.totalRows,ROWS)}. افتح حالة، راجع دليلها، ثم سجّل قرارك.`);
+    if(referenceError||referenceWarning||aiError||revisionWarning||state.storageIssue)notify((state.cancelled?[aiError,revisionWarning,state.storageIssue]:[referenceError,referenceWarning,aiError,revisionWarning,state.storageIssue]).filter(Boolean).join(' '),true);else notify(`اكتمل فحص ${arabicCount(report.summary.totalRows,ROWS)}. افتح حالة، راجع دليلها، ثم سجّل قرارك.`);
     $('results-heading').focus({preventScroll:true});$('results-panel').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
-  }catch(error){notify(error.message||'تعذّر إجراء الفحص. راجع الملف والنطاق ثم أعد المحاولة.',true);setStep(2);}finally{setBusy(false);}
+  }catch(error){
+    if(error.name==='AbortError'||state.cancelled){notify(`أُوقف التشغيل بطلبك؛ لم يُنشأ تقرير جديد.${state.report?' بقي التقرير السابق وقراراته كما كانا.':' بقي الملف المقروء لتتمكن من إعادة الفحص.'}${state.storageIssue?` ${state.storageIssue}`:''}`,!!state.storageIssue);setStep(state.report?3:2);}
+    else{notify(error.message||'تعذّر إجراء الفحص. راجع الملف والنطاق ثم أعد المحاولة.',true);setStep(2);}
+  }finally{setBusy(false);}
 }
 function badge(text,attributes={}){const item=node('span',text,'badge');for(const[key,value]of Object.entries(attributes))item.dataset[key]=value;return item;}
 function getEvidenceStatus(finding){if(finding.type==='structural')return{label:'دليل من صفوف الملف',value:'structural'};const provenance=finding.evidence?.referenceProvenance||state.report.provenance.reference;if(provenance.sourceKind==='synthetic-teaching')return{label:'مرجع اصطناعي تعليمي',value:'synthetic'};if(provenance.sourceKind==='quranpedia-api')return{label:provenance.verificationStatus==='verified'?'وصل من Quranpedia':'تعذّر إثبات سلسلة الجلب',value:provenance.verificationStatus};if(provenance.sourceKind==='user-upload')return{label:'بيانات قدّمها المستخدم',value:'unverified'};return{label:'بلا مرجع مقابل',value:'missing'};}
@@ -245,7 +265,7 @@ function openFinding(finding){
     quranBox($('detail-content'),row);
     renderModelEvidence($('detail-content'),row);
   }
-  if(finding.code==='missing_verses')quranMissingBox($('detail-content'),finding);  if($('detail-content').querySelector('mark')){const legend=node('p',null,'mark-legend');legend.append(node('mark','كلمة'),' الكلمات المظللة والمسطّرة هي مواضع الاختلاف التي رصدتها القاعدة بين النصين. هي إشارة للقراءة وليست حكماً على المعنى.');$('detail-content').querySelector('.detail-grid')?.before(legend);}  if(related.length>5)append($('detail-content'),'p',`تؤثر الإشارة على ${arabicCount(related.length,ROWS)}. يظهر هنا أول 5 صفوف؛ التقرير يحتويها جميعاً.`,'field-hint');sourceBlock($('detail-content'),finding,related[0]);const teamCase=teamWorkspace.decorate(finding,$('detail-content'));document.querySelector('.decision-section').hidden=!teamCase.canDecide;$('decision-note').value=draft?draft.note:saved?.note||'';$('decision-state').textContent=draft?'استُعيدت مسودتك التي لم تُحفظ؛ اضغط «حفظ القرار» لتثبيتها.':saved?'قرارك محفوظ في هذا المتصفح.':'';updateDecisionButtons();$('finding-dialog').showModal();$('finding-dialog').scrollTop=0;
+  if(finding.code==='missing_verses')quranMissingBox($('detail-content'),finding);  if($('detail-content').querySelector('mark')){const legend=node('p',null,'mark-legend');const legendText=finding.code==='negation_comparison_abstain'?' الكلمات المظللة والمسطّرة هي قائمة أدوات النفي في كل نص. لم يحدد الفحص نطاق النفي أو أثره على المعنى؛ التظليل يساعدك على القراءة فقط.':' الكلمات المظللة والمسطّرة هي مواضع الاختلاف التي رصدتها القاعدة بين النصين. هي إشارة للقراءة وليست حكماً على المعنى.';legend.append(node('mark','كلمة'),legendText);$('detail-content').querySelector('.detail-grid')?.before(legend);}  if(related.length>5)append($('detail-content'),'p',`تؤثر الإشارة على ${arabicCount(related.length,ROWS)}. يظهر هنا أول 5 صفوف؛ التقرير يحتويها جميعاً.`,'field-hint');sourceBlock($('detail-content'),finding,related[0]);const teamCase=teamWorkspace.decorate(finding,$('detail-content'));document.querySelector('.decision-section').hidden=!teamCase.canDecide;$('decision-note').value=draft?draft.note:saved?.note||'';$('decision-state').textContent=savedDecisionNotice({draft,saved,storageFailed:state.storageFailed,storageIssue:state.storageIssue});updateDecisionButtons();$('finding-dialog').showModal();$('finding-dialog').scrollTop=0;
 }
 function quranBox(parent,row){
   if(!row.verseId)return;
@@ -301,7 +321,18 @@ function rememberDraft(){
 /** Write the current decisions (plus earlier unapplied ones) to this review's store. Returns false when the browser cannot keep them. */
 function persistDecisions(){
   if(!state.decisionKey){state.storageFailed=true;state.storageIssue=state.storageIssue||STORAGE_UNAVAILABLE_NOTE;return false;}
-  try{localStorage.setItem(state.decisionKey,JSON.stringify(buildDecisionStore(state.decisions,state.decisionFingerprints,state.unappliedDecisions)));state.storageFailed=false;return true;}
+  try{
+    let decisions=state.decisions,unapplied=state.unappliedDecisions;
+    if(state.decisionStoreNeedsReload){
+      const loaded=loadDecisionStore(localStorage,{key:state.decisionKey,legacyKey:state.legacyDecisionKey,legacyFingerprintMap:state.legacyFingerprintMap});
+      const entries={...loaded.entries,...buildDecisionStore(decisions,state.decisionFingerprints,unapplied)};
+      for(const fingerprint of state.withdrawnFingerprints||[])delete entries[fingerprint];
+      const restored=applyStoredDecisions(entries,state.decisionFingerprints);decisions=restored.decisions;unapplied=restored.unapplied;
+    }
+    localStorage.setItem(state.decisionKey,JSON.stringify(buildDecisionStore(decisions,state.decisionFingerprints,unapplied)));
+    state.decisions=decisions;state.unappliedDecisions=unapplied;state.unappliedCount=Object.keys(unapplied||{}).length;state.decisionStoreNeedsReload=false;state.withdrawnFingerprints=[];
+    state.storageFailed=false;if(state.storageIssue===STORAGE_UNAVAILABLE_NOTE)state.storageIssue='';return true;
+  }
   catch{state.storageFailed=true;state.storageIssue=STORAGE_UNAVAILABLE_NOTE;return false;}
 }
 function publicationState(){
@@ -341,6 +372,7 @@ function saveDecision(){
   if(!teamWorkspace.canDecide(state.activeFinding)){$('decision-state').textContent='هذه الحالة ليست مفتوحة لقرارك ضمن الفريق.';return;}
   if(!$('decision-note').value.trim()){$('decision-state').textContent='اكتب سبب القرار أو سؤال الإحالة قبل الحفظ.';$('decision-note').focus();return;}
   state.decisions[state.activeFinding.id]={decision:state.draftDecision,note:$('decision-note').value.trim(),savedAt:new Date().toISOString()};
+  state.withdrawnFingerprints=(state.withdrawnFingerprints||[]).filter(fp=>fp!==state.decisionFingerprints[state.activeFinding.id]);
   delete state.drafts[draftKey(state.activeFinding)];
   if(persistDecisions())$('decision-state').textContent=teamWorkspace.role()==='reviewer'?'حُفظ في متصفحك فقط. لم يصل للمشرف بعد: نزّل ملف التسليم من لوحة الفريق وأرسله.':'حُفظ القرار والسبب. يظهران في ملف المتابعة.';
   else $('decision-state').textContent='القرار محفوظ لهذه الجلسة فقط. نزّل التقرير قبل إغلاق الصفحة.';
@@ -350,6 +382,7 @@ function saveDecision(){
 function withdrawDecision(){
   const finding=state.activeFinding;if(!finding||!state.decisions[finding.id])return;
   if(!teamWorkspace.canDecide(finding)){$('decision-state').textContent='هذه الحالة ليست مفتوحة لقرارك ضمن الفريق.';return;}
+  state.withdrawnFingerprints=[...(state.withdrawnFingerprints||[]),state.decisionFingerprints[finding.id]].filter(Boolean);
   delete state.decisions[finding.id];delete state.drafts[draftKey(finding)];state.draftDecision=null;
   $('decision-state').textContent=persistDecisions()?'سُحب القرار المحفوظ؛ عادت الحالة غير محسومة. ما كتبته بقي في خانة السبب إن أردت حفظ قرار جديد.':'سُحب القرار في هذه الجلسة، لكن التخزين المحلي غير متاح: نزّل التقرير قبل إغلاق الصفحة.';
   renderFindings();teamWorkspace.refresh();setStep(3);
@@ -358,7 +391,7 @@ function withdrawDecision(){
 function clearAllDecisions(){
   const applied=Object.keys(state.decisions).length,kept=Object.keys(state.unappliedDecisions).length;if(!applied&&!kept||teamWorkspace.active())return;
   if(!confirm(`سيُمسح كل ما حُفظ لهذه المراجعة من قرارات وأسبابها في هذا المتصفح، ولا يمكن التراجع. قرارات مطبّقة الآن: ${number(applied)}${kept?`، وقرارات سابقة لم تُطبَّق: ${number(kept)}`:''}. نزّل التقرير أولًا إن احتجتها. متابعة؟`))return;
-  state.decisions={};state.unappliedDecisions={};state.unappliedCount=0;state.drafts={};state.draftDecision=null;
+  state.decisions={};state.unappliedDecisions={};state.unappliedCount=0;state.drafts={};state.draftDecision=null;state.decisionStoreNeedsReload=false;state.withdrawnFingerprints=[];
   let erased=Boolean(state.decisionKey);try{if(state.decisionKey){localStorage.removeItem(state.decisionKey);if(state.legacyDecisionKey)localStorage.removeItem(state.legacyDecisionKey);}}catch{erased=false;}
   renderFindings();teamWorkspace.refresh();if(state.step===4)renderDossier();
   notify(erased?'مُسحت كل القرارات المحفوظة لهذه المراجعة من هذا المتصفح.':'مُسحت القرارات من هذه الصفحة، لكن التخزين المحلي غير متاح فقد تبقى نسخة منها فيه.',!erased);

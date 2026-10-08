@@ -175,6 +175,7 @@ function numericInventory(text,language) {
     const next = items[last+1], following = items[last+2];
     if (next && numberLike(next,language)) problem('adjacent_numeric_components_not_supported',next);
     if (next && (next.value === 'and' || next.value === 'و') && numberLike(following,language)) problem('separate_numeric_conjunction_ambiguous',next);
+    if (next?.value === '^') problem('numeric_power_not_supported',next);
     if (next && ((['/',':','-','–','—'].includes(next.value) && !(next.value==='-'&&QUANTITY_UNITS.has(following?.value))) || (digitQuantity(next) && next.start === items[last].end))) problem('fraction_range_date_or_time_not_supported',next);
     if (next && next.start === items[last].end && /^[\p{L}]/u.test(next.text) && !QUANTITY_UNITS.has(next.value) && !unsupportedQuantityUnit(next.value)) problem('adjacent_identifier_or_compound_syntax',next);
     // Words before the whole number phrase (the article of "a hundred" belongs to the phrase).
@@ -202,8 +203,12 @@ function numericRawSignature(text,language) {
   const items = quantityTokens(text);
   return items.flatMap((token,index) => {
     if(!numberLike(token,language))return [];
-    const prior=items.slice(Math.max(0,index-3),index).map(part=>part.value).join(' ');
-    const context=/(?:at least|at most|more than|less than|between|على الأقل|على الاقل|أكثر من|اكثر من|أقل من|اقل من)$/.test(prior) || APPROXIMATE_QUANTITY.has(items[index-1]?.value) || ['<','>','≤','≥'].includes(items[index-1]?.value) ? prior : '';
+    // The article is part of "a hundred/thousand", matching numericInventory.
+    // Otherwise it hides bounds such as "at least a hundred" from this fast
+    // path, so changed bounds can be mistaken for an unchanged quantity.
+    const phraseStart = (language === 'en' || !language) && ARTICLE_SCALE_EN.has(token.value) && items[index-1]?.value === 'a' ? index-1 : index;
+    const prior=items.slice(Math.max(0,phraseStart-3),phraseStart).map(part=>part.value).join(' ');
+    const context=/(?:at least|at most|more than|less than|between|على الأقل|على الاقل|أكثر من|اكثر من|أقل من|اقل من)$/.test(prior) || APPROXIMATE_QUANTITY.has(items[phraseStart-1]?.value) || ['<','>','≤','≥'].includes(items[phraseStart-1]?.value) ? prior : '';
     return [[token.text,items[index-1] && !/[\p{L}\p{N}]/u.test(items[index-1].text) ? items[index-1].text : '',items[index+1] && (!/[\p{L}\p{N}]/u.test(items[index+1].text) || QUANTITY_UNITS.has(items[index+1].value) || unsupportedQuantityUnit(items[index+1].value) || items[index+1].start===token.end) ? items[index+1].text : '',context]];
   });
 }
@@ -547,6 +552,8 @@ export function auditBatch({ rows, referenceRows = [], scope = { type: 'full' },
       comparisonStatus: 'abstain',
       numericReview: { state: 'not_compared', reason: 'reference_or_row_gate' },
       qualifierReview: { state: 'not_compared', reason: 'reference_or_row_gate' },
+      negationReview: { state: 'not_compared', reason: 'reference_or_row_gate', inventoryOnly: true, scopeEvaluated: false },
+      languageReview: { state: 'not_compared', reason: 'reference_or_row_gate', scopeEvaluated: false },
       comparisonReason: 'missing_reference',
       findingIds: [],
       findings: [],
@@ -707,12 +714,13 @@ export function auditBatch({ rows, referenceRows = [], scope = { type: 'full' },
           if (verified) comparedRows += 1;
           else unverifiedReferenceRows += 1;
           compareLexically(row, candidateLanguage || referenceLanguage, addFinding);
-          if (row.qualifierReview.reason === 'language_checks_unsupported') languageLimitedRows += 1;
+          if (row.languageReview.state === 'abstain') languageLimitedRows += 1;
         }
       }
     }
     const structuralOrComparison = row.findings.some((finding) => finding.type === 'structural' || finding.type === 'comparison');
-    const ruleAbstained = row.numericReview.state === 'abstain' || row.qualifierReview.state === 'abstain';
+    const ruleAbstained = row.numericReview.state === 'abstain' || row.qualifierReview.state === 'abstain'
+      || row.negationReview.state === 'abstain' || row.languageReview.state === 'abstain';
     row.status = structuralOrComparison ? 'needs_review' : row.comparisonStatus === 'abstain' || ruleAbstained ? 'abstain' : 'no_signal';
   }
   if (referenceMissingRows || referenceAmbiguousRows || unverifiedReferenceRows || referenceRows.length === 0 || languagesDiffer) {
@@ -732,13 +740,13 @@ export function auditBatch({ rows, referenceRows = [], scope = { type: 'full' },
     });
   }
   const languageChecksInfo = languageChecks(candidateLanguage || referenceLanguage);
-  const languageAbstainedRows = report.rows.filter((row) => row.status === 'abstain' && row.comparisonReason === 'language_checks_unsupported').length;
+  const languageAbstainedRows = report.rows.filter((row) => row.status === 'abstain' && row.languageReview.state === 'abstain').length;
   if (languageLimitedRows > 0) {
     addFinding({
       code: 'language_checks_limited', type: 'evidence', severity: 'info',
-      message: `فحص النفي والأعداد المكتوبة بالحروف يعمل للعربية والإنجليزية فقط، وفحص الكلمات المؤثرة (مثل «كل» و«بعض» و«يجب») للإنجليزية وحدها. لغة هذا الملف (${languageChecksInfo.language}) خارجها، فغياب الإشارة هنا لا يعني أن هذه الفحوص جرت. الأرقام المكتوبة بالأرقام تُقارَن في كل اللغات. عدد الصفوف التي اختلف نصها عن المرجع: ${languageLimitedRows}؛ ما لم تظهر فيه إشارة أخرى بقي «ممتنعًا» ليقرأه مراجع.`,
-      reason: 'Negation markers (ar, en), written-number grammar (ar single cardinals, en) and qualifier markers (en) do not exist for the declared language, so rows whose words differ cannot be cleared by these checks; absence of an alert is not evidence that the check ran.',
-      evidence: { ...languageChecksInfo, supportedLanguages: { negation: [...NEGATION_LANGUAGES], writtenNumbers: [...WRITTEN_NUMBER_LANGUAGES], qualifierMarkers: [...QUALIFIER_LANGUAGES] }, rowsLimited: languageLimitedRows, rowsAbstained: languageAbstainedRows, humanReviewRequired: true },
+      message: `فحص النفي والأعداد المكتوبة بالحروف يعمل للعربية والإنجليزية فقط، وفحص الكلمات المؤثرة للإنجليزية وحدها. لغة هذا الملف (${languageChecksInfo.language}) خارجها، فغياب الإشارة هنا لا يعني أن هذه الفحوص جرت، حتى عندما يطابق النص المرجع. بقي فحص البنية والشوائب والأرقام الرقمية واختلاف الألفاظ. عدد الصفوف ذات الفحوص اللغوية غير المدعومة: ${languageLimitedRows}؛ عند نهاية فحص القواعد وقبل أي نموذج اختياري، بقي منها ${languageAbstainedRows} صفًا «ممتنعًا»، والبقية تحمل إشارات أخرى تحتاج قراءة.`,
+      reason: 'Negation markers, written-number grammar and qualifier markers do not exist for the declared language. Literal equality does not imply those rules ran; every comparable row records the language limitation.',
+      evidence: { ...languageChecksInfo, supportedLanguages: { negation: [...NEGATION_LANGUAGES], writtenNumbers: [...WRITTEN_NUMBER_LANGUAGES], qualifierMarkers: [...QUALIFIER_LANGUAGES] }, rowsLimited: languageLimitedRows, rowsAbstained: languageAbstainedRows, counterStage: 'structural-lexical-rules', scopeEvaluated: false, humanReviewRequired: true },
     });
   }
   const countCode = (code) => report.rows.filter((row) => row.findings.some((finding) => finding.code === code)).length;
@@ -778,11 +786,14 @@ export function auditBatch({ rows, referenceRows = [], scope = { type: 'full' },
     numericAbstainRows: countCode('numeric_comparison_abstain'),
     qualifierChangeRows: countCode('potential_qualifier_change'),
     qualifierAbstainRows: countCode('qualifier_comparison_abstain'),
-    negationCountChangeRows: countCode('potential_negation_count_change'),
+    // Compatibility counter: counts inventory abstentions, never actionable meaning-change verdicts.
+    negationCountChangeRows: countCode('negation_comparison_abstain'),
+    negationAbstainRows: countCode('negation_comparison_abstain'),
+    unsupportedRuleLanguageRows: countCode('language_rule_abstain'),
     lexicalDifferenceRows: countCode('lexical_difference'),
     structuralComplete: rows.length > 0 && missingVerses === 0 && report.findings.every((finding) => finding.type !== 'structural'),
     referenceIntegrity: referenceIssues,
-    languageLimits: { ...languageChecksInfo, rowsLimited: languageLimitedRows },
+    languageLimits: { ...languageChecksInfo, rowsLimited: languageLimitedRows, rowsAbstained: languageAbstainedRows },
     certification: 'none',
   };
   return report;
@@ -808,37 +819,41 @@ function languageChecks(language) {
 // (every declared language except ar and en); Arabic and English behave exactly as before.
 const meaningChecksUnavailable = (checks) => Boolean(checks.language) && !checks.negationChecked && !checks.writtenNumbersChecked && !checks.quantifierChecked;
 
-// Negation markers of `own` that have no same-value partner in `other` (counted per value, in reading order).
-function unpairedNegations(own, other) {
-  const available = new Map();
-  for (const token of other) available.set(token.value, (available.get(token.value) ?? 0) + 1);
-  return own.filter((token) => {
-    const left = available.get(token.value) ?? 0;
-    if (left > 0) { available.set(token.value, left - 1); return false; }
-    return true;
-  });
-}
-// A count-only difference (both sides negate) is much noisier across legitimate translations than a presence difference
-// (measured on a different clean translation), so it is emitted as its own medium-priority code; presence stays high.
-const NEGATION_COUNT_CODE = 'potential_negation_count_change';
-const NEGATION_COUNT_SEVERITY = 'medium';
-
 function compareLexically(row, language, addFinding) {
+  const checks = languageChecks(language);
+  const unavailable = meaningChecksUnavailable(checks);
+  row.languageReview = {
+    ...checks, state: unavailable ? 'abstain' : 'supported',
+    reason: unavailable ? 'language_checks_unsupported' : null,
+    languageIsUserDeclared: true, scopeEvaluated: false,
+    retainedChecks: ['structural ID coverage', 'text hygiene', 'bounded digit-literal quantity inventory', 'token-set lexical comparison'],
+  };
+  if (unavailable) {
+    // Record the unavailable rules before the identical-text shortcut: equality
+    // must not imply that unsupported language rules or meaning were checked.
+    if (!row.comparisonReason) row.comparisonReason = 'language_checks_unsupported';
+    addFinding({
+      code: 'language_rule_abstain', type: 'evidence', severity: 'info',
+      message: 'امتناع جزئي عن قواعد اللغة المعلنة: لم يُفحص النفي والأعداد المكتوبة بالحروف والكلمات المؤثرة بهذه القواعد، حتى إن طابق النص المرجع. بقيت فحوص البنية والشوائب والأرقام الرقمية واختلاف الألفاظ.',
+      reason: 'The declared language has no supported word-based marker rules. Literal comparison remains available, but unsupported linguistic checks cannot clear the row.',
+      evidence: { ...row.languageReview, humanReviewRequired: true },
+    }, [row]);
+  }
   compareQuantities(row, language, addFinding);
   compareQualifiers(row, language, addFinding);
   const candidateTokens = tokens(row.translation);
   const referenceTokens = tokens(row.reference.translation);
+  const negationSet = language === 'ar' ? ARABIC_NEGATIONS : language === 'en' || !language ? ENGLISH_NEGATIONS : null;
+  const candidateNegations = negationSet ? candidateTokens.filter((token) => negationSet.has(token.value)) : [];
+  const referenceNegations = negationSet ? referenceTokens.filter((token) => negationSet.has(token.value)) : [];
+  row.negationReview = {
+    state: negationSet ? candidateNegations.length || referenceNegations.length ? 'unchanged_count' : 'none' : 'unsupported',
+    candidateNegationCount: negationSet ? candidateNegations.length : null,
+    referenceNegationCount: negationSet ? referenceNegations.length : null,
+    supportedMarkerLanguage: negationSet ? language || 'en (undeclared language)' : null,
+    inventoryOnly: true, scopeEvaluated: false,
+  };
   if (normalizedText(row.translation) === normalizedText(row.reference.translation)) return;
-  const checks = languageChecks(language);
-  if (meaningChecksUnavailable(checks)) {
-    // The words differ but negation, written numbers and qualifier markers cannot be checked in this language:
-    // never let such a row end as "no_signal". The qualifierReview hook is the one status/context code already treats as abstention.
-    row.qualifierReview = {
-      state: 'abstain', reason: 'language_checks_unsupported', declaredLanguage: checks.language, supportedMarkerLanguage: 'en',
-      unsupportedChecks: ['negation', 'written_numbers', 'qualifier_markers'], digitsChecked: true, inventoryOnly: true, humanReviewRequired: true,
-    };
-    if (!row.comparisonReason) row.comparisonReason = 'language_checks_unsupported';
-  }
   const evidence = {
     method: 'transparent lexical rules; no trained model',
     potentialOnly: true,
@@ -850,35 +865,27 @@ function compareLexically(row, language, addFinding) {
   };
   // Same-language English/Arabic marker lists are deliberately narrow. Unknown
   // languages get lexical comparison only, never a fabricated negation result.
-  const negationSet = language === 'ar' ? ARABIC_NEGATIONS : language === 'en' || !language ? ENGLISH_NEGATIONS : null;
   if (negationSet) {
-    const candidateNegations = candidateTokens.filter((token) => negationSet.has(token.value));
-    const referenceNegations = referenceTokens.filter((token) => negationSet.has(token.value));
     const countOnlyDifference = candidateNegations.length > 0 && referenceNegations.length > 0 && candidateNegations.length !== referenceNegations.length;
     if (countOnlyDifference) {
-      // Both sides negate, but one has more markers (e.g. "not ... not" vs "not"). Markers are paired by value in
-      // reading order; the unpaired ones are the added (candidate) or removed (reference) markers.
-      const added = unpairedNegations(candidateNegations, referenceNegations);
-      const removed = unpairedNegations(referenceNegations, candidateNegations);
+      // All original markers are evidence for reading, not inferred added or
+      // removed scope. Consolidation, neither/nor and quoted words can change counts.
+      row.negationReview.state = 'abstain';
       addFinding({
-        code: NEGATION_COUNT_CODE, type: 'comparison', severity: NEGATION_COUNT_SEVERITY,
-        message: 'اختلاف محتمل في عدد أدوات النفي: النفي موجود في النصين لكن عدد مرّاته مختلف؛ راجع السياق والمعنى مع الدليل.',
-        reason: 'Explicit negation markers are present on both sides but their counts differ. This is a potential lexical signal, not proof of changed meaning; legitimate translations may negate differently.',
+        code: 'negation_comparison_abstain', type: 'evidence', severity: 'info',
+        message: 'اختلف عدد أدوات النفي مع وجود نفي في النصين؛ امتنع الفحص عن تفسير نطاقه. قد يكون حذفًا أو إضافة أو إعادة صياغة سليمة؛ اقرأ النصين ولم يحكم الفحص بتغيّر المعنى.',
+        reason: 'Both sides contain negation but marker counts differ. Token inventory cannot resolve scope, legitimate consolidation or quoted words; human reading is required, and no changed-meaning verdict is emitted.',
         spans: [
-          ...added.map((token) => ({ field: 'translation', start: token.start, end: token.end, text: token.text, role: 'candidate', change: 'added' })),
-          ...removed.map((token) => ({ field: 'translation', start: token.start, end: token.end, text: token.text, role: 'reference', change: 'removed' })),
+          ...candidateNegations.map((token) => ({ field: 'translation', start: token.start, end: token.end, text: token.text, role: 'candidate' })),
+          ...referenceNegations.map((token) => ({ field: 'translation', start: token.start, end: token.end, text: token.text, role: 'reference' })),
         ],
         evidence: {
-          ...evidence, countOnly: true,
+          ...evidence, ...row.negationReview, countOnly: true,
           candidateNegations: candidateNegations.map((token) => token.text), referenceNegations: referenceNegations.map((token) => token.text),
-          candidateNegationCount: candidateNegations.length, referenceNegationCount: referenceNegations.length,
-          // Only candidate-side fragments are listed as text; reference-side fragments stay in spans and referenceNegations,
-          // which the live-reference export redaction already strips.
-          addedNegations: added.map((token) => token.text), addedNegationCount: added.length, removedNegationCount: removed.length,
-          supportedMarkerLanguage: language || 'en (undeclared language)',
         },
       }, [row]);
     } else if (Boolean(candidateNegations.length) !== Boolean(referenceNegations.length)) {
+      row.negationReview.state = 'difference';
       addFinding({
         code: 'potential_negation_change', type: 'comparison', severity: 'high',
         message: 'اختلاف محتمل في وجود أداة نفي؛ راجع السياق والمعنى مع الدليل.',
@@ -887,7 +894,7 @@ function compareLexically(row, language, addFinding) {
           ...candidateNegations.map((token) => ({ field: 'translation', start: token.start, end: token.end, text: token.text, role: 'candidate' })),
           ...referenceNegations.map((token) => ({ field: 'translation', start: token.start, end: token.end, text: token.text, role: 'reference' })),
         ],
-        evidence: { ...evidence, candidateNegations: candidateNegations.map((token) => token.text), referenceNegations: referenceNegations.map((token) => token.text), supportedMarkerLanguage: language || 'en (undeclared language)' },
+        evidence: { ...evidence, candidateNegations: candidateNegations.map((token) => token.text), referenceNegations: referenceNegations.map((token) => token.text), supportedMarkerLanguage: language || 'en (undeclared language)', inventoryOnly: true, scopeEvaluated: false },
       }, [row]);
     }
   }

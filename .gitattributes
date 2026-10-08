@@ -1,6 +1,8 @@
+* text=auto eol=lf
 # The Quran display file is pinned by SHA-256 in public/modules/quran-text.mjs.
 # Never let git change its bytes (line endings), or the app will refuse to show it.
 public/data/** -text
+public/vendor/ort/*.mjs -text
 *.ttf binary
 *.png binary
 *.wasm binary

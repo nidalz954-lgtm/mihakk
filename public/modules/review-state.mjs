@@ -1,5 +1,6 @@
 /** DOM-free review-state helpers shared by app.js and tests: decision store, CSV records, dates. Nothing here touches the network. */
 import {caseResolution} from './dossier.mjs';
+import {decisionFingerprintInput} from './ui-helpers.mjs';
 
 export const DECISION_STORE_PREFIX = 'mihakk:decisions:v3:';
 export const LEGACY_DECISION_STORE_PREFIX = 'mihakk:decisions:v2:';
@@ -16,6 +17,14 @@ const isPlain = value => Boolean(value) && typeof value === 'object' && !Array.i
 export function reviewIdentityInput(report) {
   const reference = report?.provenance?.reference ?? {}, candidate = report?.provenance?.candidate ?? {};
   return {schema:report?.schemaVersion, scope:report?.scope, language:candidate.language, sourceKind:reference.sourceKind, book:reference.bookId, sourceTitle:reference.fullTitle || reference.title, edition:reference.edition, referenceLanguage:reference.language, author:reference.author || reference.translator || null, publisher:reference.publisher || null};
+}
+
+/** File-wide and duplicate-row summaries lack the complete text needed to identify a reviewed file. */
+export function fileAwareDecisionInput(finding, candidateSha256) {
+  const evidence = decisionFingerprintInput(finding);
+  if (finding.type !== 'structural' || (finding.rowNumbers?.length && finding.code !== 'duplicate_verse')) return evidence;
+  if (!FINGERPRINT.test(candidateSha256 ?? '')) throw new Error('Missing candidate fingerprint for file-wide decision');
+  return JSON.stringify({policy:'file-wide-structural/v1', candidateSha256, evidence});
 }
 
 /** Same validity rule the store has always used for a saved decision. */
@@ -39,11 +48,13 @@ export function parseDecisionStore(raw) {
  * so a withdrawn decision cannot come back from it. A corrupt store is overwritten with valid JSON.
  * Throws when storage itself is inaccessible; callers treat that as "storage unavailable".
  */
-export function loadDecisionStore(storage, {key, legacyKey = ''}) {
+export function loadDecisionStore(storage, {key, legacyKey = '', legacyFingerprintMap = {}}) {
   const current = parseDecisionStore(storage.getItem(key));
   const legacyRaw = legacyKey ? storage.getItem(legacyKey) : null;
   const legacy = legacyRaw == null ? {entries:{}, corrupt:false} : parseDecisionStore(legacyRaw);
-  const entries = {...legacy.entries, ...current.entries};
+  // Only the v2 key is bound to this exact file. Unbound old v3 structural entries stay unapplied.
+  const legacyEntries = Object.fromEntries(Object.entries(legacy.entries).map(([fingerprint, entry]) => [legacyFingerprintMap[fingerprint] || fingerprint, entry]));
+  const entries = {...legacyEntries, ...current.entries};
   const result = {entries, repaired:false, migrated:0};
   if (current.corrupt) { try { storage.setItem(key, JSON.stringify(entries)); result.repaired = true; } catch { /* Reported by the caller as a failed repair on the next save. */ } }
   if (legacyRaw != null) {
@@ -125,6 +136,13 @@ export function joinRowTexts(texts) {
 
 export const CSV_HEADER = ['finding_id','code','type','severity','verse_ids','row_numbers','message','candidate_text','reference_text','source','source_edition','source_url','reference_verification','decision','reviewer_note','decision_time','candidate_sha256','scope','generated_at','notice','resolution_state','hidden_control_chars','synthetic_demo_data','publication_authorized'];
 
+/** A recorded teaching or uploaded source must never inherit a claim of live retrieval. */
+function referenceVerificationDisclosure(source) {
+  if (source.sourceKind === 'synthetic-teaching') return 'authored_teaching_only';
+  if (source.verificationStatus !== 'verified') return 'not_verified';
+  return source.sourceKind === 'quranpedia-api' ? 'retrieved_from_source_not_scholarly_verified' : 'provenance_recorded_not_scholarly_verified';
+}
+
 /**
  * Review table for the CSV export. The first 20 columns keep their original order and meaning; later columns are additions.
  * Reference text of a live Quranpedia source is never written.
@@ -142,7 +160,7 @@ export function buildReviewCsvLines({report, decisions = {}, candidateSha256 = '
     const live = source.sourceKind === 'quranpedia-api';
     const referenceTexts = [...new Set(rows.map(row => row.reference?.translation).filter(text => text != null))];
     const candidateText = joinRowTexts(rows.map(row => row.translation));
-    lines.push([finding.id, finding.code, finding.type, finding.severity, (finding.verseIds || []).join(';'), rowNumbers.join(';'), finding.message, candidateText, live ? 'Reference text omitted; consult source URL' : joinRowTexts(referenceTexts), source.title, source.edition, first?.reference?.sourceURL || source.sourceURL || source.url, source.verificationStatus === 'verified' ? 'retrieved_from_source_not_scholarly_verified' : source.verificationStatus, decision.decision, decision.note, decision.savedAt, candidateSha256, scope, report.generatedAt, notice, caseResolution(finding, decisions), hiddenControlFlags(rows.map(row => row.translation).join('')), flag, 'false']);
+    lines.push([finding.id, finding.code, finding.type, finding.severity, (finding.verseIds || []).join(';'), rowNumbers.join(';'), finding.message, candidateText, live ? 'Reference text omitted; consult source URL' : joinRowTexts(referenceTexts), source.title, source.edition, first?.reference?.sourceURL || source.sourceURL || source.url, referenceVerificationDisclosure(source), decision.decision, decision.note, decision.savedAt, candidateSha256, scope, report.generatedAt, notice, caseResolution(finding, decisions), hiddenControlFlags(rows.map(row => row.translation).join('')), flag, 'false']);
   }
   if (!report.findings.length) lines.push(['','','','','','','لم تظهر إشارات ضمن نطاق الفحص؛ النتيجة ليست اعتماداً.','','',report.provenance.reference.title,'','','','','','','',scope,report.generatedAt,notice,'','',flag,'false']);
   return lines;
@@ -152,6 +170,15 @@ export function buildReviewCsvLines({report, decisions = {}, candidateSha256 = '
 const arabicNumber = value => new Intl.NumberFormat('ar').format(Number(value) || 0);
 export const STORAGE_UNAVAILABLE_NOTE = 'التخزين المحلي غير متاح؛ قراراتك لن تبقى بعد إغلاق الصفحة. نزّل تقريرك قبل الإغلاق.';
 export const STORE_REPAIRED_NOTE = 'كان مخزن القرارات المحلي لهذه المراجعة تالفًا فأُعيد إنشاؤه؛ لم يمكن قراءة ما كان فيه.';
+
+/** The case dialog must distinguish a saved decision from one held only in this page. */
+export function savedDecisionNotice({draft, saved, storageFailed = false, storageIssue = ''} = {}) {
+  if (draft) return 'استُعيدت مسودتك التي لم تُحفظ؛ اضغط «حفظ القرار» لتثبيتها.';
+  if (!saved) return '';
+  return storageFailed || storageIssue === STORAGE_UNAVAILABLE_NOTE
+    ? 'القرار محفوظ لهذه الجلسة فقط؛ التخزين المحلي غير متاح. نزّل التقرير قبل إغلاق الصفحة.'
+    : 'قرارك محفوظ في هذا المتصفح.';
+}
 
 /** "N من M محسومة" for the results step; the figures come from caseProgress, the same helper the dossier counts use. */
 export function decisionProgressText(progress) {

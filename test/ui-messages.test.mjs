@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import {
   languageName, languageLimitsNotice, findingTitleOverride, normalizeSearchText, findingSearchText, rowlessFindingsText,
   displayFileName, withoutFinalStop, stopMessage, unverifiedEmbeddingNote, checklistStatusWord, missingVersePreview,
-  nonTextCellNote, referenceDefects, referenceDefectLines,
+  nonTextCellNote, referenceDefects, referenceDefectLines, createOperationProgress, modelFailureNotice,
 } from '../public/modules/ui-helpers.mjs';
 import { QURAN_DISPLAY, QURAN_LOAD_TIMEOUT_MS, loadQuranText } from '../public/modules/quran-text.mjs';
 import { strictInteger, isValidVerseId } from '../src/quran-index.mjs';
@@ -15,14 +15,16 @@ const css = await readFile(new URL('../public/styles.css', import.meta.url), 'ut
 
 // ---- BUG-02 (UI side): the language-limits line --------------------------------------------------
 
-test('BUG-02: a French run with limited rows explains which checks did not run and that the rows are abstentions, not "no signal"', () => {
+test('BUG-02: a French run explains unavailable checks without calling every limited row an abstention', () => {
   const notice = languageLimitsNotice({ language: 'fr', negationChecked: false, quantifierChecked: false, writtenNumbersChecked: false, digitsChecked: true, rowsLimited: 3 });
   assert.ok(notice);
   assert.equal(notice.rows, 3);
-  for (const part of ['النفي', 'الكمّ والإلزام', 'الأعداد المكتوبة بالحروف', '«الفرنسية»', 'امتنا', 'ليست «لا إشارة»', 'الأرقام الرقمية']) assert.ok(notice.long.includes(part), part);
+  for (const part of ['النفي', 'الكمّ والإلزام', 'الأعداد المكتوبة بالحروف', '«الفرنسية»', 'امتنا', 'ليس «لا إشارة»', 'الأرقام الرقمية', 'قد تظهر فيها إشارات أخرى', 'ولا يساوي بالضرورة عدد الصفوف الممتنعة']) assert.ok(notice.long.includes(part), part);
   assert.match(notice.short, /3 صفوف|٣ صفوف/);
   assert.match(notice.short, /«الفرنسية»/);
   assert.match(notice.short, /امتناع/);
+  assert.match(notice.short, /قد تحمل إشارات أخرى/);
+  assert.doesNotMatch(notice.short, /فهي امتناع/);
 });
 
 test('BUG-02: only the checks that really did not run are named, and old or empty reports render nothing', () => {
@@ -44,6 +46,47 @@ test('BUG-02: app.js renders the language line in the results sentence and in #r
   assert.match(app, /append\(\$\('report-context'\),'p',limits\.long,'context-note warning'\)/);
   assert.match(app, /\$\{limitsShort\(summary\)\}/);
   assert.match(app, /language_checks_limited:'[^']+'/);
+  assert.match(app, /language_rule_abstain:'[^']+'/);
+  assert.match(app, /negation_comparison_abstain:'[^']+'/);
+  assert.match(app, /potential_negation_count_change:'[^']*ليس حكمًا بتغير المعنى'/);
+});
+
+test('operation progress survives phase-local download resets and resets only for a new operation', () => {
+  const progress = createOperationProgress();
+  const shown = [10,36,40,21,25,60,55,93,94,98].map(value => progress.next(value));
+  assert.deepEqual(shown, [10,36,40,40,40,60,60,93,94,98]);
+  assert.equal(progress.next(100), 99, 'a phase completing is not completion of the whole review');
+  assert.equal(progress.next(Number.NaN), 99);
+  progress.reset();
+  assert.equal(progress.next(10), 10, 'the next real operation starts afresh');
+});
+
+test('partial E5 failures remain visible with the real reason and actual completed-pair count', () => {
+  const analysis = {semanticProcessedRows:2,semanticEligibleRows:7,execution:{completed:false,cancelled:false,error:'فشل تحقق الملف.'}};
+  const before = JSON.stringify(analysis);
+  const notice = modelFailureNotice(analysis,'embedding');
+  assert.match(notice, /تعذّر استكمال نموذج التشابه: فشل تحقق الملف\./);
+  assert.match(notice, /(?:2|٢) من (?:7|٧) مقارنة مكتملة/);
+  assert.match(notice, /الباقي بلا تحليل/);
+  assert.equal(JSON.stringify(analysis),before,'the failure message must not discard or rewrite execution evidence');
+  assert.equal(modelFailureNotice(analysis,'embedding',{cancelledByUser:true}),null,'the user stop message is handled separately');
+  assert.equal(modelFailureNotice({semanticProcessedRows:2,execution:{completed:true}},'embedding'),null);
+});
+
+test('a failed or internally terminated model is never described as stopped by the user or as 0 of 0', () => {
+  const notice = modelFailureNotice({semanticProcessedRows:0,semanticEligibleRows:0,execution:{cancelled:true,error:'تعذّر بدء العامل.'}},'embedding');
+  assert.match(notice, /تعذّر/);
+  assert.match(notice, /لم تكتمل أي مقارنة/);
+  assert.doesNotMatch(notice, /بطلبك|0 من 0|٠ من ٠|حُفظت/);
+  const contextual = modelFailureNotice({contextProcessedRows:3,contextEligibleRows:8,contextError:'انقطع التنفيذ.',contextExecution:{completed:false}},'context-multi');
+  assert.match(contextual, /المؤشر السياقي: انقطع التنفيذ\./);
+  assert.match(contextual, /(?:3|٣) من (?:8|٨)/);
+});
+
+test('a failure reported after the last model pair is still a failure without inventing unprocessed pairs', () => {
+  const notice = modelFailureNotice({semanticProcessedRows:2,semanticEligibleRows:2,execution:{completed:false,error:'فشل إغلاق التشغيل.'}},'embedding');
+  assert.match(notice, /أبلغ عن فشل/);
+  assert.doesNotMatch(notice, /الباقي بلا تحليل/);
 });
 
 // ---- BUG-04: the "uncalibrated, not an accuracy figure" caption --------------------------------------
@@ -205,7 +248,7 @@ test('BUG-31: trailing full stops are removed so a joined sentence never ends wi
   assert.equal(withoutFinalStop(undefined), '');
   assert.doesNotMatch(`تعذّر استكمال النموذج: ${withoutFinalStop('انتهت مهلة النموذج.')}. نتائج`, /\.\./);
   assert.match(app, /تعذّر استكمال النموذج: \$\{withoutFinalStop\(error\.message\)\}\./);
-  assert.match(app, /state\.cancelled\?\[aiError,revisionWarning\]/);
+  assert.match(app, /state\.cancelled\?\[aiError,revisionWarning,state\.storageIssue\]/);
   assert.doesNotMatch(app, /جارٍ حفظ المقارنات المكتملة بعد إيقاف العملية الإضافية/);
 });
 
@@ -321,4 +364,15 @@ test('BUG-46: the case window offers a retry button after a failed or timed-out 
   assert.match(app, /quranRetry\(box,load\)/);
   // The pinned display-only wording of the original box is unchanged.
   assert.match(app, /البرنامج لا يقارن الترجمة بهذا النص آليًا/);
+});
+
+test('the actual progress callback keeps retry/download messages while its percentage stays monotonic', () => {
+  const source=app.match(/function aiProgress\(progress\)\{[^\n]+\}/)?.[0];assert.ok(source);
+  const progress=createOperationProgress(), seen=[];
+  const callback=new Function('showProgress','number',`${source};return aiProgress;`)((message,value)=>seen.push({message,value:progress.next(value)}),value=>String(value));
+  callback({status:'progress',progress:50,message:'downloaded 100 of 200 MB'});
+  callback({status:'progress',progress:40,message:'connection lost; resuming download'});
+  callback({status:'context-inference',done:1,total:10,progress:10});
+  assert.equal(seen[0].message,'downloaded 100 of 200 MB');assert.equal(seen[1].message,'connection lost; resuming download');
+  assert.ok(seen[1].value>=seen[0].value);assert.ok(seen[2].value>=seen[1].value);
 });

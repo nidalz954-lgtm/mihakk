@@ -14,7 +14,6 @@
 html{scroll-padding-top:84px}
 /* F2: site.js publishes the real header height (it wraps to 2 rows on phones); the tool uses it for every scroll target so the #notice banner is not parked under the sticky header */
 html:has(body[data-view="tool"]){scroll-padding-top:calc(var(--app-header-h,76px) + 8px)}
-#notice{scroll-margin-top:calc(var(--app-header-h,76px) + 8px)}
 body{background:var(--bg);color:var(--text)}
 body[data-view="landing"] .app-header,body[data-view="landing"] .app-frame,body[data-view="landing"] #finding-dialog:not([open]){display:none!important}
 body[data-view="tool"] #landing{display:none!important}
@@ -304,6 +303,7 @@ body[data-view="landing"] .site-footer{padding-bottom:96px}
   .case-decision{width:66%}
 }
 @media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto!important}
   .js-ready .reveal{opacity:1!important;translate:none!important;transition:none!important}
   .hero-head>*,.showcase-3d,.float,.play-dot{animation:none!important}
   .showcase-3d{transform:none!important}

@@ -42,8 +42,18 @@ function detectDelimiter(text) {
     eligible.sort((a, b) => Number(b.fitsLayout) - Number(a.fitsLayout) || b.width - a.width || a.priority - b.priority);
     return eligible[0].candidate;
   }
-  const line = text.split(/\r\n|\n|\r/).find(value => value.trim()) ?? '';
-  return [',', '\t', ';', '|'].sort((a, b) => line.split(b).length - line.split(a).length)[0];
+  // A blank-heavy file can contain millions of physical lines. Find just the
+  // first non-blank line; never allocate an array for every line or separator.
+  const contentStart = text.search(/\S/u);
+  if (contentStart < 0) return ',';
+  const lineStart = Math.max(text.lastIndexOf('\n', contentStart - 1), text.lastIndexOf('\r', contentStart - 1)) + 1;
+  const lf = text.indexOf('\n', contentStart), cr = text.indexOf('\r', contentStart);
+  const lineEnd = Math.min(lf < 0 ? text.length : lf, cr < 0 ? text.length : cr);
+  const counts = new Map([[',', 0], ['\t', 0], [';', 0], ['|', 0]]);
+  for (let index = lineStart; index < lineEnd; index++) {
+    if (counts.has(text[index])) counts.set(text[index], counts.get(text[index]) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1])[0][0];
 }
 
 export function parseDelimited(text, delimiter, sampleRows = Infinity) {

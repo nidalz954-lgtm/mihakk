@@ -178,6 +178,10 @@ export function createWeightGuard({ pins, cacheName = 'transformers-cache', scop
     const guarded = async (input, init) => {
       const pin = byUrl.get(requestUrl(input));
       if (!pin || String(init?.method ?? input?.method ?? 'GET').toUpperCase() !== 'GET') return original(input, init);
+      // transformers.js may swallow a cache.match rejection and try the network. A failed
+      // integrity check must stay failed for this attempt, with its mismatch evidence intact.
+      // The caller starts the next attempt with clearFailure(), after the bad cache was evicted.
+      if (failure?.details?.url === pin.url) throw failure;
       const response = await (fetchWeights ? fetchWeights(original, input, init, pin) : original(input, init));
       if (!response.ok || !response.body) return response;
       return verifying(response, pin, 'download', null);
@@ -357,10 +361,10 @@ export function describeModelError(raw) {
   if (raw?.name === 'WeightIntegrityError') return done('integrity', raw.message);
   if (ARABIC_LETTER.test(text) && !/ERROR_CODE|protobuf/i.test(text)) return done('app', text.replace(/[.。]+$/, ''), null);
   if (/Can't create a session|ERROR_CODE|protobuf|parsing failed|INVALID_PROTOBUF|Invalid (?:model|ONNX)|Failed to load model|Deserialize|ModelProto/i.test(text)) return done('corrupt_model', 'ملف النموذج المحفوظ تالف أو غير صالح؛ امسح بيانات الموقع في المتصفح (التخزين المؤقت) ثم أعد المحاولة ليُنزَّل من جديد');
-  if (/out of memory|Array buffer allocation failed|memory access out of bounds|Cannot allocate|allocation failed|Invalid typed array length|Aborted\(.*memory/i.test(text)) return done('memory', 'نفدت ذاكرة المتصفح أثناء تشغيل النموذج؛ أغلق التبويبات الأخرى وأعد المحاولة، أو تابع دون نموذج');
+  if (/out of memory|Array buffer allocation failed|memory access out of bounds|Cannot allocate|allocation failed|failed to allocate(?: a buffer)?|Invalid typed array length|Aborted\(\s*OOM\s*\)|Aborted\(.*memory/i.test(text)) return done('memory', 'نفدت ذاكرة المتصفح أثناء تشغيل النموذج؛ أغلق التبويبات الأخرى وأعد المحاولة، أو تابع دون نموذج');
   if (/did not honour the Range/i.test(text)) return done('network', 'انقطع تنزيل ملف النموذج ولم يقبل الخادم استئنافه من الموضع نفسه؛ أعد المحاولة');
-  if (/Failed to fetch|NetworkError|Load failed|network|ERR_(?:HTTP2|CONNECTION|NETWORK|INTERNET|TIMED)|timed? ?out/i.test(text)) return done('network', 'تعذّر تنزيل ملفات النموذج؛ تحقّق من الاتصال بالإنترنت أو من حجب Hugging Face وjsDelivr');
+  if (/Failed to fetch|NetworkError|Load failed|network|ERR_(?:HTTP2|CONNECTION|NETWORK|INTERNET|TIMED)|timed? ?out/i.test(text)) return done('network', 'تعذّر تنزيل ملفات النموذج؛ تحقّق من الاتصال بالإنترنت ومن إمكانية الوصول إلى Hugging Face وملفات هذا الموقع');
   if (/Could not locate file|Unauthorized|Forbidden|Bad gateway|Service unavailable|Gateway timeout|Internal server error|Bad request|Request timeout/i.test(text)) return done('server', 'ردّ خادم ملفات النموذج بخطأ؛ أعد المحاولة لاحقًا');
-  if (/wasm|WebAssembly|ort-wasm|dynamically imported module|Failed to resolve module|Cross-Origin|import\(\)/i.test(text)) return done('runtime', 'تعذّر تحميل مشغّل النموذج في هذا المتصفح؛ جرّب Chrome أو Edge حديثًا أو تحقّق من حجب jsDelivr');
+  if (/wasm|WebAssembly|ort-wasm|dynamically imported module|Failed to resolve module|Cross-Origin|import\(\)/i.test(text)) return done('runtime', 'تعذّر تحميل مشغّل النموذج في هذا المتصفح؛ جرّب Chrome أو Edge حديثًا أو تحقّق من إتاحة ملفات المشغّل على هذا الموقع');
   return done('unknown', 'تعذّر تشغيل النموذج المحلي في هذا المتصفح');
 }

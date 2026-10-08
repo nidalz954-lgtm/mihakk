@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
+import {readFileSync} from 'node:fs';
 import {auditBatch, generateDemoRows, generateDemoReferenceRows} from '../public/modules/batch-engine.mjs';
 import {decisionFingerprintInput, csvCell} from '../public/modules/ui-helpers.mjs';
 import {buildReviewDossier, caseProgress, caseResolution, isUnresolvedCase} from '../public/modules/dossier.mjs';
 import {createRunManifest, appendRunHistory, mergeRunHistory, parseRunHistory, stringifyRunHistory, RUN_HISTORY_LIMIT} from '../public/modules/run-manifest.mjs';
 import {
-  reviewIdentityInput, parseDecisionStore, loadDecisionStore, applyStoredDecisions, buildDecisionStore, localDateStamp, rowsInDeclaredScope,
+  reviewIdentityInput, fileAwareDecisionInput, savedDecisionNotice, STORAGE_UNAVAILABLE_NOTE, STORE_REPAIRED_NOTE, parseDecisionStore, loadDecisionStore, applyStoredDecisions, buildDecisionStore, localDateStamp, rowsInDeclaredScope,
   hiddenControlFlags, joinRowTexts, buildReviewCsvLines, CSV_HEADER, decisionProgressText, unappliedDecisionsNote, teamSoloDecisionNotice, MAX_KEPT_UNAPPLIED_DECISIONS,
 } from '../public/modules/review-state.mjs';
 
@@ -19,7 +20,10 @@ function audit({rows = generateDemoRows(), referenceRows = generateDemoReference
   return report;
 }
 const sha = async text => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
-async function fingerprints(report) { return Object.fromEntries(await Promise.all(report.findings.map(async finding => [finding.id, await sha(decisionFingerprintInput(finding))]))); }
+async function fingerprints(report) {
+  const candidateSha256 = report.provenance.candidate.sha256 || await sha(JSON.stringify(report.rows.map(row => [row.surah,row.ayah,row.translation])));
+  return Object.fromEntries(await Promise.all(report.findings.map(async finding => [finding.id, await sha(fileAwareDecisionInput(finding,candidateSha256))])));
+}
 class FakeStorage {
   constructor(initial = {}) { this.map = new Map(Object.entries(initial)); this.failWrites = false; this.blocked = false; }
   getItem(key) { if (this.blocked) throw new Error('blocked'); return this.map.has(key) ? this.map.get(key) : null; }
@@ -29,7 +33,7 @@ class FakeStorage {
 const n = value => new Intl.NumberFormat('ar').format(value); // digit shape follows the ICU locale data of the runtime
 const decision = (value, note = 'سبب القرار', savedAt = '2026-10-07T10:00:00.000Z') => ({decision:value, note, savedAt});
 
-test('BUG-05: editing one decided verse keeps the other saved decisions and reports the one not applied', async () => {
+test('editing one verse keeps unchanged text-case decisions; file-wide decisions require the exact file', async () => {
   const first = audit(), fpFirst = await fingerprints(first);
   const byCode = code => first.findings.find(finding => finding.code === code);
   const chosen = [byCode('potential_negation_change'), byCode('empty_translation'), byCode('missing_verses')];
@@ -49,12 +53,12 @@ test('BUG-05: editing one decided verse keeps the other saved decisions and repo
   assert.deepEqual(reviewIdentityInput(second), reviewIdentityInput(first), 'review identity must not depend on the file content');
   const idByCode = code => second.findings.find(finding => finding.code === code)?.id;
   const applied = applyStoredDecisions(store, fpSecond);
-  assert.equal(applied.appliedCount, 2);
-  assert.equal(applied.unappliedCount, 1);
+  assert.equal(applied.appliedCount, 1);
+  assert.equal(applied.unappliedCount, 2);
   assert.equal(applied.decisions[idByCode('empty_translation')].decision, 'reject');
-  assert.equal(applied.decisions[idByCode('missing_verses')].decision, 'refer');
+  assert.equal(applied.decisions[idByCode('missing_verses')], undefined, 'an absent-verse decision is bound to the entire candidate file');
   assert.equal(applied.decisions[idByCode('potential_negation_change')], undefined, 'the changed case must not inherit the old decision');
-  assert.ok(unappliedDecisionsNote(applied.unappliedCount).startsWith(`قرارات محفوظة سابقًا لم تُطبَّق: ${n(1)}،`));
+  assert.ok(unappliedDecisionsNote(applied.unappliedCount).startsWith(`قرارات محفوظة سابقًا لم تُطبَّق: ${n(2)}،`));
 
   // Saving again keeps the unapplied decision, so restoring the original evidence restores it.
   const after = buildDecisionStore(applied.decisions, fpSecond, applied.unapplied);
@@ -206,6 +210,30 @@ test('BUG-35: live Quranpedia reference text is never written to the CSV', () =>
   assert.ok(lines.slice(1).every(line => referenceTexts.every(text => !String(line[column]).includes(text))));
 });
 
+test('CSV reference disclosure separates authored teaching, recorded provenance and verified live retrieval', () => {
+  const cases = [
+    ['synthetic-teaching', 'verified', 'authored_teaching_only'],
+    ['quranpedia-api', 'verified', 'retrieved_from_source_not_scholarly_verified'],
+    ['quranpedia-api', 'unverified', 'not_verified'],
+    ['user-upload', 'verified', 'provenance_recorded_not_scholarly_verified'],
+    ['user-upload', 'unverified', 'not_verified'],
+  ];
+  for (const [sourceKind, verificationStatus, expected] of cases) {
+    const source = {title:'Authored non-religious control', sourceKind, verificationStatus};
+    const report = {
+      rows:[{rowNumber:2, translation:'An authored classroom example.', reference:{translation:'A different authored classroom example.', provenance:source}}],
+      findings:[{id:'control', code:'lexical_difference', type:'comparison', severity:'low', rowNumbers:[2], verseIds:['1:1'], message:'Compare this authored sample.'}],
+      provenance:{candidate:{synthetic:true}, reference:{...source, verificationStatus:'verified'}}, scope:{type:'provided'}, generatedAt:'2026-10-08T00:00:00.000Z',
+    };
+    const lines = buildReviewCsvLines({report});
+    assert.deepEqual(lines[0], CSV_HEADER);
+    assert.equal(lines[1].length, CSV_HEADER.length);
+    assert.equal(lines[1][CSV_HEADER.indexOf('reference_verification')], expected, `${sourceKind}/${verificationStatus}`);
+    assert.equal(lines[1][CSV_HEADER.indexOf('publication_authorized')], 'false');
+    assert.equal(lines[1][CSV_HEADER.indexOf('reference_text')], sourceKind === 'quranpedia-api' ? 'Reference text omitted; consult source URL' : report.rows[0].reference.translation);
+  }
+});
+
 test('BUG-45: invisible and bidi control characters are flagged in the CSV and never stripped', () => {
   assert.equal(hiddenControlFlags('plain text'), '');
   assert.equal(hiddenControlFlags('a‮b⁧c​d​'), 'bidi_control=U+202E:1,U+2067:1;zero_width=U+200B:2');
@@ -267,4 +295,79 @@ test('BUG-11: the team notice appears only when solo decisions would be hidden',
   assert.equal(teamSoloDecisionNotice(0), '');
   assert.ok(teamSoloDecisionNotice(2).startsWith(`قراراتك الفردية المحفوظة (${n(2)}) لن تُحتسب في وضع الفريق`));
   assert.match(teamSoloDecisionNotice(2), /تعود عند «إنهاء وضع الفريق»/);
+});
+
+test('a file-wide decision never applies to a different file with identical missing-verse evidence', async () => {
+  const first=audit(), firstMap=await fingerprints(first), finding=first.findings.find(item=>item.code==='missing_verses');
+  const store=buildDecisionStore({[finding.id]:decision('reject')},firstMap);
+  const changed=audit({rows:generateDemoRows().map(row=>({...row,translation:row.translation?`Distinct file: ${row.translation}`:''}))});
+  const changedMap=await fingerprints(changed), restored=applyStoredDecisions(store,changedMap);
+  assert.equal(restored.appliedCount,0);assert.equal(restored.unappliedCount,1);
+  assert.equal(applyStoredDecisions(store,firstMap).appliedCount,1);
+  assert.throws(()=>fileAwareDecisionInput(finding,''),/Missing candidate fingerprint/);
+});
+
+test('exact-file v2 migration rekeys structural evidence; unbound old v3 evidence stays unapplied', () => {
+  const old='a'.repeat(64), bound='b'.repeat(64), d=decision('reject');
+  const legacy=new FakeStorage({old:JSON.stringify({[old]:d})});
+  const loaded=loadDecisionStore(legacy,{key:'current',legacyKey:'old',legacyFingerprintMap:{[old]:bound}});
+  assert.equal(applyStoredDecisions(loaded.entries,{case:bound}).appliedCount,1);
+  assert.equal(legacy.getItem('old'),null);
+  const current=new FakeStorage({current:JSON.stringify({[old]:d})});
+  const preserved=loadDecisionStore(current,{key:'current',legacyKey:'absent',legacyFingerprintMap:{[old]:bound}});
+  assert.equal(applyStoredDecisions(preserved.entries,{case:bound}).appliedCount,0);
+  assert.equal(applyStoredDecisions(preserved.entries,{case:bound}).unappliedCount,1);
+});
+
+test('the actual app save path reports quota failure and clears the unavailable warning after recovery', () => {
+  const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+  const source=app.match(/function persistDecisions\(\)\{[\s\S]*?\n\}/)?.[0];assert.ok(source);
+  const persist=new Function('state','localStorage','buildDecisionStore','STORAGE_UNAVAILABLE_NOTE','loadDecisionStore','applyStoredDecisions',`${source};return persistDecisions();`);
+  const fp='a'.repeat(64), state={decisionKey:'key',decisions:{case:decision('reject')},decisionFingerprints:{case:fp},unappliedDecisions:{},storageIssue:'',storageFailed:false};
+  const storage=new FakeStorage();storage.failWrites=true;
+  assert.equal(persist(state,storage,buildDecisionStore,STORAGE_UNAVAILABLE_NOTE,loadDecisionStore,applyStoredDecisions),false);
+  assert.equal(state.storageFailed,true);assert.equal(state.storageIssue,STORAGE_UNAVAILABLE_NOTE);
+  assert.match(savedDecisionNotice({saved:state.decisions.case,...state}),/لهذه الجلسة فقط/);
+  storage.failWrites=false;assert.equal(persist(state,storage,buildDecisionStore,STORAGE_UNAVAILABLE_NOTE,loadDecisionStore,applyStoredDecisions),true);
+  assert.equal(state.storageFailed,false);assert.equal(state.storageIssue,'');
+  assert.deepEqual(JSON.parse(storage.getItem('key'))[fp],state.decisions.case);
+  assert.equal(savedDecisionNotice({saved:state.decisions.case,...state}),'قرارك محفوظ في هذا المتصفح.');
+  state.storageIssue=STORE_REPAIRED_NOTE;assert.equal(persist(state,storage,buildDecisionStore,STORAGE_UNAVAILABLE_NOTE,loadDecisionStore,applyStoredDecisions),true);
+  assert.equal(state.storageIssue,STORE_REPAIRED_NOTE,'a successful save does not erase a different historical warning');
+  assert.equal(savedDecisionNotice({draft:{note:'unsaved'},saved:state.decisions.case,storageFailed:true}),'استُعيدت مسودتك التي لم تُحفظ؛ اضغط «حفظ القرار» لتثبيتها.');
+});
+
+test('initially blocked storage keeps the exact-file evidence key so a later save can recover', async () => {
+  const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+  const source=app.match(/async function setupDecisionStorage\(report\)\{[\s\S]*?\n\}/)?.[0];assert.ok(source);
+  const report=audit(), candidateSha256=await sha(JSON.stringify(report.rows));
+  const state={candidate:{sha256:candidateSha256}}, storage=new FakeStorage();storage.blocked=true;
+  const setup=new Function('state','localStorage','digest','$','reviewIdentityInput','fileAwareDecisionInput','decisionFingerprintInput','loadDecisionStore','applyStoredDecisions','DECISION_STORE_PREFIX','LEGACY_DECISION_STORE_PREFIX','STORAGE_UNAVAILABLE_NOTE','STORE_REPAIRED_NOTE',`${source};return setupDecisionStorage;`)(state,storage,sha,()=>({value:'none'}),reviewIdentityInput,fileAwareDecisionInput,decisionFingerprintInput,loadDecisionStore,applyStoredDecisions,'mihakk:decisions:v3:','mihakk:decisions:v2:',STORAGE_UNAVAILABLE_NOTE,STORE_REPAIRED_NOTE);
+  await setup(report);assert.equal(state.storageFailed,true);assert.equal(state.storageIssue,STORAGE_UNAVAILABLE_NOTE);
+  assert.match(state.decisionKey,/^mihakk:decisions:v3:[a-f0-9]{64}$/);assert.match(state.runKey,/^[a-f0-9]{64}$/);
+  const finding=report.findings.find(item=>item.code==='missing_verses');assert.match(state.decisionFingerprints[finding.id],/^[a-f0-9]{64}$/);
+  storage.blocked=false;state.decisions[finding.id]=decision('refer');
+  const persistSource=app.match(/function persistDecisions\(\)\{[\s\S]*?\n\}/)[0];
+  const persist=new Function('state','localStorage','buildDecisionStore','STORAGE_UNAVAILABLE_NOTE','loadDecisionStore','applyStoredDecisions',`${persistSource};return persistDecisions();`);
+  assert.equal(persist(state,storage,buildDecisionStore,STORAGE_UNAVAILABLE_NOTE,loadDecisionStore,applyStoredDecisions),true);
+  assert.equal(state.storageIssue,'');assert.equal(state.storageFailed,false);
+  assert.equal(Object.keys(parseDecisionStore(storage.getItem(state.decisionKey)).entries).length,1);
+});
+
+test('a duplicate-verse decision is never reused after its duplicated texts change', async () => {
+  const first=audit(), fpFirst=await fingerprints(first), finding=first.findings.find(item=>item.code==='duplicate_verse');assert.ok(finding);
+  const store=buildDecisionStore({[finding.id]:decision('reject')},fpFirst);
+  const changed=audit({rows:generateDemoRows().map(row=>finding.verseIds.includes(`${row.surah}:${row.ayah}`)?{...row,translation:`Changed duplicate ${row.translation}`}:row)});
+  const result=applyStoredDecisions(store,await fingerprints(changed));assert.equal(result.appliedCount,0);assert.equal(result.unappliedCount,1);
+});
+
+test('recovery merges unread prior decisions, honors session overrides and never restores withdrawn cases', () => {
+  const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),source=app.match(/function persistDecisions\(\)\{[\s\S]*?\n\}/)[0];
+  const persist=new Function('state','localStorage','buildDecisionStore','STORAGE_UNAVAILABLE_NOTE','loadDecisionStore','applyStoredDecisions',`${source};return persistDecisions();`);
+  const a='a'.repeat(64),b='b'.repeat(64),c='c'.repeat(64),d='d'.repeat(64);
+  const storage=new FakeStorage({key:JSON.stringify({[a]:decision('refer','old A'),[b]:decision('reject','old B'),[c]:decision('refer','withdrawn C'),[d]:decision('refer','older unapplied')})});
+  const state={decisionKey:'key',legacyDecisionKey:'',decisionStoreNeedsReload:true,legacyFingerprintMap:{},decisions:{A:decision('accept','new A')},decisionFingerprints:{A:a,B:b,C:c},unappliedDecisions:{},withdrawnFingerprints:[c],storageFailed:true,storageIssue:STORAGE_UNAVAILABLE_NOTE};
+  assert.equal(persist(state,storage,buildDecisionStore,STORAGE_UNAVAILABLE_NOTE,loadDecisionStore,applyStoredDecisions),true);
+  const saved=JSON.parse(storage.getItem('key'));assert.equal(saved[a].note,'new A');assert.equal(saved[b].note,'old B');assert.equal(saved[c],undefined);assert.equal(saved[d].note,'older unapplied');
+  assert.equal(state.decisions.B.decision,'reject');assert.equal(state.unappliedCount,1);assert.equal(state.decisionStoreNeedsReload,false);assert.equal(state.storageIssue,'');
 });

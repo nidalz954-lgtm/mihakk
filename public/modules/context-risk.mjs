@@ -293,8 +293,9 @@ export function appendContextResults(report, results = [], execution = {}, model
     if (languageBlockedKeys.has(row.key)) row.contextNotEligibleReason = blockedReason;
     row.contextStatus = eligibleKeys.has(row.key) ? 'not_processed' : 'not_eligible';
     const otherReview = row.findings.some((finding) => finding.type === 'structural' || finding.type === 'comparison');
-    // Rule abstentions (numeric or qualifier syntax) must survive the context step; they are not "no signal".
-    const ruleAbstained = row.numericReview?.state === 'abstain' || row.qualifierReview?.state === 'abstain';
+    // A model result cannot turn checks the rules did not perform into "no signal".
+    const ruleAbstained = row.numericReview?.state === 'abstain' || row.qualifierReview?.state === 'abstain'
+      || row.languageReview?.state === 'abstain' || row.negationReview?.state === 'abstain';
     row.status = otherReview ? 'needs_review' : row.comparisonStatus === 'abstain' || ruleAbstained ? 'abstain' : 'no_signal';
   }
   enriched.findings = enriched.findings.filter((finding) => !String(finding.id).startsWith('context-'));
@@ -395,6 +396,8 @@ export function appendContextResults(report, results = [], execution = {}, model
     needsReviewRows: enriched.rows.filter((row) => row.status === 'needs_review').length,
     noSignalRows: enriched.rows.filter((row) => row.status === 'no_signal').length,
     abstainRows: enriched.rows.filter((row) => row.status === 'abstain').length,
+    ...(enriched.summary.languageLimits ? {languageLimits: {...enriched.summary.languageLimits,
+      rowsAbstained: enriched.rows.filter(row => row.status === 'abstain' && row.languageReview?.state === 'abstain').length}} : {}),
     contextProcessedRows: processed, contextEligibleRows: eligible.length,
     contextAbstainRows: (realExecution ? [...accepted.keys()].filter((key) => rowsByKey.get(key).nli.classification.outcome === 'abstain').length : 0) + languageBlockedKeys.size,
     contextLanguageBlockedRows: languageBlockedKeys.size,

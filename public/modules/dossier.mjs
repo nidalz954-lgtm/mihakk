@@ -35,8 +35,9 @@ export function aiExecutionState(report) {
   const kind = analysis.contextModel || requestedMode.startsWith('context') ? 'context' : 'embedding';
   const processed = Number(kind === 'context' ? analysis.contextProcessedRows : analysis.semanticProcessedRows) || 0;
   const eligible = Number(kind === 'context' ? analysis.contextEligibleRows : analysis.semanticEligibleRows) || 0;
-  const cancelled = analysis.aiCancelled === true || analysis.contextExecution?.cancelled === true;
-  const error = analysis.modelError || analysis.contextError || null;
+  const execution = kind === 'context' ? analysis.contextExecution : analysis.execution;
+  const cancelled = analysis.aiCancelled === true || execution?.cancelled === true;
+  const error = analysis.modelError || analysis.contextError || execution?.error || null;
   const findings = report?.findings ?? [];
   const abstentions = findings.filter(f => f.code === 'context_uncertain').length;
   const truncated = findings.filter(f => ['context_input_truncated','semantic_input_truncated'].includes(f.code)).length;

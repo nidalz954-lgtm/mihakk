@@ -34,6 +34,25 @@ test('CSV cells neutralise ASCII and full-width formula prefixes', () => {
   assert.equal(csvCell(null), '""');
 });
 
+test('CSV cells preserve and neutralise formulas hidden behind Unicode controls, marks, separators and fillers', () => {
+  const prefixes = [
+    '\u061C', '\u034F', '\u180E', '\u3164', '\u115F', '\u1160', '\uFFA0',
+    '\u0000', '\u0001', '\u001F', '\u007F', '\u0085', '\u009F',
+    '\uFE0F', '\u{E0100}', '\u{E0001}', '\u{E0061}',
+    '\u200B', '\u202E', '\u2067', '\uFEFF', '\u00A0', '\u2028', '\u2029',
+    ' \u061C\u034F\u0001\u{E0061}\uFE0F\u3164',
+  ];
+  for (const prefix of prefixes) {
+    for (const marker of ['=', '+', '-', '@', '＝', '＋', '－', '＠', '−']) {
+      const value = `${prefix}${marker}HYPERLINK("example")`;
+      assert.equal(csvCell(value), `"'${value.replace(/"/g, '""')}"`, JSON.stringify(value));
+    }
+    const ordinary = `${prefix}نص عربي محفوظ`;
+    assert.equal(csvCell(ordinary), `"${ordinary}"`, 'non-formula text stays byte-for-byte intact');
+  }
+  assert.equal(csvCell('نص عربي =1+1'), '"نص عربي =1+1"', 'a formula marker within ordinary text is not a prefix');
+});
+
 test('decision fingerprints ignore rerun timestamps but keep evidence content', () => {
   const finding = (inferredAt, retrievedAt, contradiction = 0.8) => ({code:'context_contradiction', type:'comparison', severity:'high', verseIds:['2:1'], rowNumbers:[3], spans:[], evidence:{scores:{contradiction, inferredAt}, referenceProvenance:{retrievedAt, bookId:1947}}});
   assert.equal(decisionFingerprintInput(finding('2026-10-04T05:00:00Z','2026-10-04T05:00:00Z')), decisionFingerprintInput(finding('2026-10-05T09:00:00Z','2026-10-05T09:00:00Z')));

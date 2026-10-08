@@ -131,6 +131,59 @@ test('BUG-09 after eviction the next run downloads again and passes (hit, miss, 
   assert.equal(nodeSha(third), pin.sha256);
 });
 
+for (const buffered of [false, true]) {
+  test(`BUG-09 a swallowed ${buffered ? 'buffered' : 'null-body'} cache refusal stays mismatched until the next attempt`, async () => {
+    const weights = randomBytes(17_003);
+    const { guard, pin, env, scope, network } = setup({ weights });
+    env.store.set(WEIGHT_URL, new Uint8Array(0));
+    if (!buffered) {
+      const cache = await env.caches.open();
+      const originalMatch = cache.match.bind(cache);
+      cache.match = async (key, ...rest) => env.store.get(WEIGHT_URL)?.length === 0
+        ? new Response(null, { status: 200, headers: { 'content-length': '0' } })
+        : originalMatch(key, ...rest);
+      assert.equal((await cache.match(WEIGHT_URL)).body, null, 'reproduces the verifier empty-cache response');
+    }
+    const savedTransformStream = globalThis.TransformStream;
+    if (buffered) globalThis.TransformStream = undefined;
+    let cacheError;
+    try {
+      // transformers.js 3.8.1 treats a cache lookup exception as a miss and falls back to fetch.
+      await assert.rejects(async () => {
+        let hit;
+        try { hit = await guard.cache.match(WEIGHT_URL); } catch (error) { cacheError = error; }
+        if (hit) return drain(hit);
+        const response = await scope.fetch(WEIGHT_URL);
+        const bytes = await drain(response);
+        await guard.cache.put(WEIGHT_URL, new Response(bytes));
+        return bytes;
+      }, error => error === cacheError && error.code === 'weight_integrity_mismatch');
+    } finally { globalThis.TransformStream = savedTransformStream; }
+    assert.deepEqual(env.calls.deletes, [WEIGHT_URL]);
+    assert.equal(env.store.has(WEIGHT_URL), false);
+    assert.equal(network.requests, 0, 'no verified replacement overwrites a refused attempt');
+    assert.equal(env.calls.puts.length, 0);
+    assert.throws(() => guard.assertVerified(pin), error => error === cacheError);
+    const failed = guard.summary(pin);
+    assert.deepEqual([failed.status, failed.weightVerified, failed.bytes], ['mismatch', false, 0]);
+    assert.equal(failed.observedSha256, nodeSha(new Uint8Array(0)));
+    const report = appendContextResults(contextReport(), [], {
+      actualInference: false, modelCalls: 0, completed: false, error: cacheError.message, weightIntegrity: failed,
+    });
+    assert.equal(report.provenance.analysis.contextWeightIntegrity.status, 'mismatch');
+    assert.equal(report.provenance.analysis.contextWeightIntegrity.weightVerified, false);
+    assert.equal(aiExecutionState(report).state, 'failed');
+
+    guard.clearFailure();
+    const retry = await loadLikeTransformers(guard, scope, WEIGHT_URL);
+    assert.equal(network.requests, 1);
+    assert.equal(nodeSha(retry), pin.sha256);
+    guard.assertVerified(pin);
+    assert.equal(guard.summary(pin).status, 'verified', 'a new attempt may verify a clean replacement');
+    assert.equal(env.store.has(WEIGHT_URL), true);
+  });
+}
+
 test('BUG-09 a tampered fresh download never reaches the session and is never written to the cache', async () => {
   const weights = randomBytes(1_000_000);
   const served = Uint8Array.from(weights);
@@ -344,7 +397,7 @@ test('BUG-40 raw ONNX / browser errors become simple Arabic; the original text i
   assert.equal(describeModelError('TypeError: Failed to fetch').kind, 'network');
   assert.equal(describeModelError(new Error('RangeError: Array buffer allocation failed')).kind, 'memory');
   assert.equal(describeModelError(new Error('Could not locate file: "https://huggingface.co/x".')).kind, 'server');
-  assert.equal(describeModelError(new Error('Failed to fetch dynamically imported module: ort-wasm-simd-threaded.jsep.mjs')).kind, 'network', 'the network text also names the jsDelivr block');
+  assert.equal(describeModelError(new Error('Failed to fetch dynamically imported module: ort-wasm-simd-threaded.jsep.mjs')).kind, 'network');
   assert.equal(describeModelError(new Error('CompileError: WebAssembly.instantiate(): expected magic word 00 61 73 6d')).kind, 'runtime');
   const unknown = describeModelError(new Error('something odd 0x1f'));
   assert.equal(unknown.kind, 'unknown');
@@ -352,6 +405,30 @@ test('BUG-40 raw ONNX / browser errors become simple Arabic; the original text i
   assert.equal(describeModelError(12345678).kind, 'unknown');
   assert.deepEqual(describeModelError(new Error('طلب مقارنة سياقية غير صالح.')), { kind: 'app', message: 'طلب مقارنة سياقية غير صالح', technicalDetails: null });
   assert.equal(describeModelError(new WeightIntegrityError('mismatch')).kind, 'integrity');
+});
+
+test('model errors describe self-hosted runtime access and recognised allocation failures honestly', () => {
+  for (const raw of [
+    'Aborted(OOM). Build with -sASSERTIONS for more info.',
+    'Aborted( OOM )',
+    'RuntimeError: failed to allocate a buffer',
+    'FAILED TO ALLOCATE 172440643 BYTES',
+  ]) {
+    const mapped = describeModelError(new Error(raw));
+    assert.equal(mapped.kind, 'memory', raw);
+    assert.match(mapped.message, /ذاكرة المتصفح/);
+    assert.doesNotMatch(mapped.message, /OOM|allocate|ASSERTIONS/i);
+    assert.equal(mapped.technicalDetails, raw);
+  }
+  const network = describeModelError(new Error('TypeError: Failed to fetch'));
+  assert.equal(network.kind, 'network');
+  assert.match(network.message, /Hugging Face/);
+  assert.match(network.message, /ملفات هذا الموقع/);
+  assert.doesNotMatch(network.message, /jsDelivr/i);
+  const runtime = describeModelError(new Error('CompileError: WebAssembly.instantiate(): expected magic word'));
+  assert.equal(runtime.kind, 'runtime');
+  assert.match(runtime.message, /ملفات المشغّل على هذا الموقع/);
+  assert.doesNotMatch(runtime.message, /jsDelivr/i);
 });
 
 test('BUG-40 context mode: a failed run terminates the worker and the next run starts a new one; technical details are kept', async () => {
@@ -443,7 +520,8 @@ test('BUG-46 cancelling the embedding mode keeps the pairs that finished and rec
     const failedOnly = structuredClone(output);
     failedOnly.provenance.analysis.aiCancelled = false;
     failedOnly.provenance.analysis.execution.cancelled = false;
-    assert.equal(aiExecutionState(failedOnly).state, 'partial');
+    assert.equal(aiExecutionState(failedOnly).state, 'failed');
+    assert.equal(aiExecutionState(failedOnly).processed, 2, 'the failed run still retains its completed pairs');
     assert.equal(terminated, 1);
   } finally { cancelSemanticAnalysis(); globalThis.Worker = oldWorker; }
 });
@@ -484,7 +562,10 @@ test('BUG-40/46 embedding failure after some pairs: results kept, worker release
     assert.equal(analysis.execution.technicalDetails, 'RangeError: Array buffer allocation failed');
     assert.equal(analysis.embeddingWeightIntegrity.status, 'declared_not_verified');
     assert.equal(terminated, 1);
-    assert.equal(aiExecutionState({ ...output, provenance: { analysis: { ...analysis, requestedMode: 'embedding-requested' } } }).state, 'partial');
+    const gate=aiExecutionState({ ...output, provenance: { analysis: { ...analysis, requestedMode: 'embedding-requested' } } });
+    assert.equal(gate.state, 'failed');
+    assert.equal(gate.processed, 1);
+    assert.match(gate.error, /نفدت ذاكرة المتصفح/);
   } finally { cancelSemanticAnalysis(); globalThis.Worker = oldWorker; }
 });
 

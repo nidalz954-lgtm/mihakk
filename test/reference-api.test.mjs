@@ -68,6 +68,31 @@ test("reference footnotes stay separate from verse text, preserve lexical bracke
   assert.notEqual(result.rows[0].sha256, result.rows[0].retrievalSha256);
 });
 
+test('reference normalization preserves attached number and unit superscripts without retaining note anchors', async () => {
+  const cases = [
+    ['10<sup>5</sup> samples remain.', '10^5 samples remain.', 1, 0],
+    ['The area is 50 m<sup>2</sup> wide.', 'The area is 50 m^2 wide.', 1, 0],
+    ['The area is 50 <b>m</b><sup>2</sup> wide.', 'The area is 50 m^2 wide.', 1, 0],
+    ['10<span><sup>5</sup></span> samples remain.', '10^5 samples remain.', 1, 0],
+    ['10<sup><a href="#fn5">5</a></sup> samples remain.', '10 samples remain.', 0, 1],
+    ['10<a href="#note5"><sup>5</sup></a> samples remain.', '10 samples remain.', 0, 1],
+    ['50 m<sup role="doc-noteref">2</sup> wide.', '50 m wide.', 0, 1],
+    ['The room<sup>2</sup> is open.', 'The room is open.', 0, 1],
+    ['10 <sup>5</sup> samples remain.', '10 samples remain.', 0, 1],
+    ['10<br/><sup>5</sup> samples remain.', '10 samples remain.', 0, 1],
+    ['10<span><br/></span><sup>5</sup> samples remain.', '10 samples remain.', 0, 1],
+    ['50 m<sup>(2)</sup> wide.', '50 m wide.', 0, 1],
+  ];
+  for (const [raw, expected, powers, notes] of cases) {
+    const client = clientWith(async () => jsonResponse([{ ayah_number: 1, translation_text: raw }]));
+    const {rows: [row]} = await client.fetchReferenceForRows({book, rows: [{surah:112, ayah:1}]});
+    assert.equal(row.translation, expected, raw);
+    assert.equal(row.normalization.quantitySuperscriptsPreserved ?? 0, powers, raw);
+    assert.equal(row.normalization.noteAnchorsRemoved, notes, raw);
+    assert.notEqual(row.rawSha256, row.normalizedSha256, raw);
+  }
+});
+
 test("invalid rows fail before any external request", async () => {
   let calls = 0;
   const client = clientWith(async () => { calls += 1; return jsonResponse([]); });

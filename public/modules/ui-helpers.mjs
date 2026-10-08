@@ -25,8 +25,9 @@ export function textDirection(language) {
   return {lang:base, dir:RTL_LANGUAGES.has(base) ? 'rtl' : 'ltr'};
 }
 
-// ASCII and full-width spreadsheet formula prefixes, after optional spaces, a BOM or invisible zero-width / direction controls.
-const FORMULA_PREFIX = /^[\s\uFEFF\u3000\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069]*[=+\-@＝＋－＠−]/;
+// Spreadsheet imports may ignore leading controls, marks, separators and Hangul fillers.
+// Keep the original cell intact, but neutralise a formula marker hidden behind those characters.
+const FORMULA_PREFIX = /^[\s\p{Cc}\p{Cf}\p{M}\p{Z}\u115F\u1160\u3164\uFFA0]*[=+\-@＝＋－＠−]/u;
 export function csvCell(value) {
   let text = String(value ?? '');
   if (FORMULA_PREFIX.test(text) || /^[\t\r\n]/.test(text)) text = `'${text}`;
@@ -94,9 +95,34 @@ export function languageLimitsNotice(limits) {
   return {
     rows,
     language: name,
-    short: `${arabicCount(rows, ROW_FORMS)} اختلف نصها بلغة «${name}»${skipped.length ? ` ولم يُفحص فيها ${skipped.map(item => item.short).join(' و')}` : ''}، فهي امتناع وليست «لا إشارة»`,
-    long: `${subject} للغة «${name}»؛ هذه الفحوص مبنية للغات محددة فقط.${digits} عدد الصفوف التي اختلف نصها ولم تُفحص معانيها بهذه الفحوص: ${countFormat.format(rows)}. بقيت امتناعًا وليست «لا إشارة»، فاقرأها بنفسك.`,
+    short: `${arabicCount(rows, ROW_FORMS)} لها حدود لغوية في «${name}»${skipped.length ? `: لم يُفحص فيها ${skipped.map(item => item.short).join(' و')}` : ''}؛ قد تحمل إشارات أخرى، وما لا يحمل إشارة أخرى يبقى امتناعًا وليس «لا إشارة»`,
+    long: `${subject} للغة «${name}»؛ هذه الفحوص مبنية للغات محددة فقط.${digits} عدد الصفوف التي بقيت فيها هذه القواعد غير متاحة: ${countFormat.format(rows)}. قد تظهر فيها إشارات أخرى تحتاج مراجعة؛ وما لا يحمل إشارة أخرى يبقى امتناعًا وليس «لا إشارة». هذا العدد يصف حدود القواعد ولا يساوي بالضرورة عدد الصفوف الممتنعة.`,
   };
+}
+
+/** Overall operation progress never moves backwards and never claims 100% while work is running. */
+export function createOperationProgress() {
+  let current = 0;
+  return {
+    reset() { current = 0; },
+    next(value) {
+      const requested = Number(value);
+      if (Number.isFinite(requested)) current = Math.max(current, Math.max(0, Math.min(99, requested)));
+      return current;
+    },
+  };
+}
+
+/** Failure after actual model pairs finished must remain visible without discarding their report. */
+export function modelFailureNotice(analysis, mode, {cancelledByUser = false} = {}) {
+  const contextual = mode === 'context' || mode === 'context-multi';
+  const execution = contextual ? analysis?.contextExecution : analysis?.execution;
+  const error = contextual ? analysis?.contextError || execution?.error : execution?.error;
+  if (!error || cancelledByUser) return null;
+  const done = Math.max(0, Math.trunc(Number(contextual ? analysis?.contextProcessedRows : analysis?.semanticProcessedRows)) || 0);
+  const eligible = Math.max(done, Math.trunc(Number(contextual ? analysis?.contextEligibleRows : analysis?.semanticEligibleRows)) || 0);
+  const retained = done ? `حُفظت ${countFormat.format(done)} من ${countFormat.format(eligible)} مقارنة مكتملة؛ ${done < eligible ? 'الباقي بلا تحليل بالنموذج.' : 'وصلت نتائج لكل الأزواج المؤهلة، لكن التشغيل أبلغ عن فشل.'}` : 'لم تكتمل أي مقارنة بالنموذج.';
+  return `تعذّر استكمال ${contextual ? 'المؤشر السياقي' : 'نموذج التشابه'}: ${withoutFinalStop(error)}. ${retained} نتائج الفحص البنيوي واللفظي متاحة.`;
 }
 
 /** Title for findings whose fixed label would contradict their evidence; null means use the standard label. */
