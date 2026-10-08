@@ -5,7 +5,8 @@ env.allowLocalModels = false;
 env.useBrowserCache = true;
 env.backends.onnx.wasm.numThreads = 1;
 env.backends.onnx.wasm.proxy = false;
-env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
+// ONNX Runtime files come from this site (public/vendor/ort/, SHA-256 pinned by test/ort-selfhost.test.mjs), not from a CDN without SRI.
+env.backends.onnx.wasm.wasmPaths = new URL('../vendor/ort/', import.meta.url).href;
 // The weight file is hashed (SHA-256) while transformers.js reads it and compared with the pin before the session is created.
 const pin = embeddingWeightPin();
 // A cut connection (CDNs drop long HTTP/2 streams on slow links) is resumed with an HTTP Range request, a few times at most.
