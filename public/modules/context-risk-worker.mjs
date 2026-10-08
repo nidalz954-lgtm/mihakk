@@ -1,7 +1,7 @@
 import { AutoTokenizer, AutoModelForSequenceClassification, env } from '../vendor/transformers-3.8.1.mjs';
 import { NLI_MODEL, CONTEXT_MODELS, decodeNliLogits, aggregateContextScores, contextWeightPin } from './context-risk.mjs';
 import { inspectContextPair, inspectContextPairForLanguage } from './context-language.mjs';
-import { createWeightGuard, createProgressAggregator, describeModelError } from './model-runtime.mjs';
+import { createWeightGuard, createResumableFetch, createProgressAggregator, describeModelError, describeRetry } from './model-runtime.mjs';
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
@@ -10,7 +10,10 @@ env.backends.onnx.wasm.proxy = false;
 env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
 // Weight files are hashed (SHA-256) while transformers.js reads them, from Cache Storage or from the network, and compared
 // with the pinned hash BEFORE the inference session is created. A mismatch deletes the cached copy and fails the load.
-const guard = createWeightGuard({ pins: Object.values(CONTEXT_MODELS).map(contextWeightPin) });
+// A cut connection (CDNs drop long HTTP/2 streams on slow links) is resumed with an HTTP Range request, a few times at most.
+let announceRetry = null;
+const resumable = createResumableFetch({ onRetry: (info) => announceRetry?.(info) });
+const guard = createWeightGuard({ pins: Object.values(CONTEXT_MODELS).map(contextWeightPin), fetchWeights: resumable });
 env.useCustomCache = true;
 env.customCache = guard.cache;
 guard.installFetch();
@@ -33,9 +36,11 @@ async function loadModel(id) {
     progress_callback: (progress) => forward(aggregator.push(progress)),
   };
   if (!loaded.has(spec.id)) {
+    announceRetry = (info) => forward(aggregator.notice(describeRetry(info)));
     forward(aggregator.start());
     const loadedTokenizer = await AutoTokenizer.from_pretrained(spec.id, options);
     const loadedModel = await AutoModelForSequenceClassification.from_pretrained(spec.id, { ...options, dtype: spec.dtype, device: 'wasm' });
+    announceRetry = null;
     guard.assertVerified(pin); // fail closed: never run weights that were not hashed and equal to the pin
     loaded.set(spec.id, { tokenizer: loadedTokenizer, model: loadedModel });
     forward(aggregator.finish());
@@ -70,6 +75,7 @@ async function inferDirection(premise, hypothesis) {
 async function execute({ id, action, inputs, model: modelKey = 'en' }) {
   let modelCalls = 0;
   guard.clearFailure();
+  resumable.clearFailure();
   spec = CONTEXT_MODELS[modelKey] ?? NLI_MODEL;
   const multilingual = spec !== NLI_MODEL;
   try {
@@ -111,7 +117,7 @@ async function execute({ id, action, inputs, model: modelKey = 'en' }) {
     } });
   } catch (error) {
     // Raw runtime text (often English ONNX/browser errors) stays in technicalDetails; the notice is simple Arabic.
-    const described = describeModelError(guard.failure ?? error);
+    const described = describeModelError(guard.failure ?? resumable.failure ?? error);
     send({ id, event: 'error', errorKind: described.kind, technicalDetails: described.technicalDetails, execution: { actualInference: modelCalls > 0, modelCalls, completed: false, model: spec.id, revision: spec.revision, weightIntegrity: guard.summary(contextWeightPin(spec)) }, message: `لم يكتمل المؤشر السياقي: ${described.message}. المقارنات المكتملة فقط محفوظة؛ لا تُعد النتائج حكمًا دينيًا.` });
   }
 }

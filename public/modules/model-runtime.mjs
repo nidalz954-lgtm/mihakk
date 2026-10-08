@@ -4,6 +4,7 @@
 //     hash BEFORE the inference session is created (BUG-09).
 //  2. One monotonic, bytes-weighted download-progress aggregator (BUG-26).
 //  3. Simple Arabic text for raw runtime errors; the original text is kept separately (BUG-40).
+//  4. Bounded retry with HTTP Range resume for the one big weight download (BUG-27).
 
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -201,6 +202,96 @@ export function createWeightGuard({ pins, cacheName = 'transformers-cache', scop
   };
 }
 
+const DEFAULT_BACKOFF_MS = Object.freeze([1500, 4000, 9000, 15000]);
+const PROGRESS_RESET_BYTES = 4 * 1048576; // a connection that moved this much before it was cut gets a fresh retry budget
+const RANGE_REFUSED = 'The server did not honour the Range request; resuming the model download was stopped.';
+const waitFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isAbort = (error) => error?.name === 'AbortError';
+
+/**
+ * Wrapper for the one big weight download: when the connection is cut after some bytes (CDNs drop long HTTP/2 streams on slow links),
+ * the rest is requested with `Range: bytes=<received>-` instead of starting over. Bounded (`maxRetries`), never loops forever.
+ * The pinned SHA-256 of the finished stream is still checked by the weight guard, so a wrongly spliced file can never run.
+ * Use as `fetchWeights` of createWeightGuard.
+ */
+export function createResumableFetch({ maxRetries = 4, backoffMS = DEFAULT_BACKOFF_MS, sleep = waitFor, onRetry = null } = {}) {
+  // Chromium turns an error raised inside a constructed Response body into a bare "TypeError: Failed to fetch" for some consumers,
+  // so the real reason (retries spent / server refused Range) is also kept here for the worker to report.
+  let lastFailure = null;
+  async function fetchResumable(original, input, init) {
+    const first = await original(input, init);
+    const total = Number(first.headers.get('content-length'));
+    const resumable = first.ok && first.status === 200 && first.body && !first.headers.get('content-encoding') && Number.isSafeInteger(total) && total > 0;
+    if (!resumable) return first;
+    let reader = first.body.getReader();
+    let received = 0;
+    let sinceReopen = 0;
+    let attempt = 0;
+    let resumes = 0;
+    const base = init?.headers ?? (typeof input === 'object' ? input?.headers : undefined);
+
+    // Returns a reader positioned at `received`, or throws when the retry budget is spent or the server cannot resume.
+    async function reopen(cause) {
+      if (sinceReopen >= PROGRESS_RESET_BYTES) attempt = 0;
+      sinceReopen = 0;
+      for (;;) {
+        // Bounded twice: per stall (maxRetries) and in total (4 x maxRetries), so a hostile or broken server cannot loop us forever.
+        if (attempt >= maxRetries || resumes >= maxRetries * 4) throw cause;
+        attempt += 1;
+        resumes += 1;
+        onRetry?.({ attempt, maxRetries, received, total, error: cause });
+        await sleep(backoffMS[Math.min(attempt - 1, backoffMS.length - 1)] ?? 0);
+        const headers = new Headers(base);
+        headers.set('Range', `bytes=${received}-`);
+        let response;
+        try { response = await original(input, { ...init, headers }); } catch (error) { if (isAbort(error)) throw error; cause = error; continue; }
+        if (response.status !== 206 || !response.body) { response.body?.cancel?.().catch(() => {}); throw new Error(RANGE_REFUSED); }
+        const range = /^bytes (\d+)-(\d+)?\/(\d+|\*)$/i.exec(response.headers.get('content-range') ?? '');
+        const length = Number(response.headers.get('content-length'));
+        // Content-Range is the proof of the offset; where the CDN does not expose it, the length must at least equal the missing tail.
+        const offsetOk = range ? Number(range[1]) === received && (range[3] === '*' || Number(range[3]) === total) : length === total - received;
+        if (!offsetOk) { response.body.cancel().catch(() => {}); throw new Error(RANGE_REFUSED); }
+        return response.body.getReader();
+      }
+    }
+
+    const body = new ReadableStream({
+      async pull(controller) {
+        for (;;) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) {
+              if (received >= total) { controller.close(); return; }
+              throw new TypeError('network error: the model download ended before all bytes arrived');
+            }
+            received += value.byteLength;
+            sinceReopen += value.byteLength;
+            controller.enqueue(value);
+            return;
+          } catch (error) {
+            // Nothing received yet, or the caller aborted: not a "resume" situation, surface the original failure.
+            if (isAbort(error) || received === 0) { lastFailure = isAbort(error) ? null : error; controller.error(error); return; }
+            try { reader = await reopen(error); } catch (final) { lastFailure = final; controller.error(final); return; }
+          }
+        }
+      },
+      cancel(reason) { return reader.cancel(reason).catch(() => {}); },
+    });
+    return new Response(body, { status: first.status, statusText: first.statusText, headers: new Headers(first.headers) });
+  }
+  Object.defineProperties(fetchResumable, {
+    failure: { get: () => lastFailure },
+    clearFailure: { value: () => { lastFailure = null; } },
+  });
+  return fetchResumable;
+}
+
+/** One line for the download notice while a cut download is resumed. */
+export function describeRetry({ attempt, maxRetries, received } = {}) {
+  const megabytes = Math.round((received ?? 0) / 1048576 * 10) / 10;
+  return `انقطع الاتصال أثناء تنزيل النموذج بعد ${megabytes} ميغابايت؛ يُستأنف التنزيل من الموضع نفسه (المحاولة ${attempt} من ${maxRetries})`;
+}
+
 /** One monotonic, bytes-weighted download percentage for all files of a model (transformers.js reports each file from 0 to 100). */
 export function createProgressAggregator({ expectedBytes = 0 } = {}) {
   const files = new Map();
@@ -249,6 +340,8 @@ export function createProgressAggregator({ expectedBytes = 0 } = {}) {
       return emit(false);
     },
     finish() { return emit(true, true); },
+    /** A status message that rides on the current progress without moving the bar (used for "resuming the download"). */
+    notice(message) { return { ...snapshot(false), message }; },
   };
 }
 
@@ -265,6 +358,7 @@ export function describeModelError(raw) {
   if (ARABIC_LETTER.test(text) && !/ERROR_CODE|protobuf/i.test(text)) return done('app', text.replace(/[.。]+$/, ''), null);
   if (/Can't create a session|ERROR_CODE|protobuf|parsing failed|INVALID_PROTOBUF|Invalid (?:model|ONNX)|Failed to load model|Deserialize|ModelProto/i.test(text)) return done('corrupt_model', 'ملف النموذج المحفوظ تالف أو غير صالح؛ امسح بيانات الموقع في المتصفح (التخزين المؤقت) ثم أعد المحاولة ليُنزَّل من جديد');
   if (/out of memory|Array buffer allocation failed|memory access out of bounds|Cannot allocate|allocation failed|Invalid typed array length|Aborted\(.*memory/i.test(text)) return done('memory', 'نفدت ذاكرة المتصفح أثناء تشغيل النموذج؛ أغلق التبويبات الأخرى وأعد المحاولة، أو تابع دون نموذج');
+  if (/did not honour the Range/i.test(text)) return done('network', 'انقطع تنزيل ملف النموذج ولم يقبل الخادم استئنافه من الموضع نفسه؛ أعد المحاولة');
   if (/Failed to fetch|NetworkError|Load failed|network|ERR_(?:HTTP2|CONNECTION|NETWORK|INTERNET|TIMED)|timed? ?out/i.test(text)) return done('network', 'تعذّر تنزيل ملفات النموذج؛ تحقّق من الاتصال بالإنترنت أو من حجب Hugging Face وjsDelivr');
   if (/Could not locate file|Unauthorized|Forbidden|Bad gateway|Service unavailable|Gateway timeout|Internal server error|Bad request|Request timeout/i.test(text)) return done('server', 'ردّ خادم ملفات النموذج بخطأ؛ أعد المحاولة لاحقًا');
   if (/wasm|WebAssembly|ort-wasm|dynamically imported module|Failed to resolve module|Cross-Origin|import\(\)/i.test(text)) return done('runtime', 'تعذّر تحميل مشغّل النموذج في هذا المتصفح؛ جرّب Chrome أو Edge حديثًا أو تحقّق من حجب jsDelivr');
