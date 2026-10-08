@@ -25,8 +25,8 @@ export function textDirection(language) {
   return {lang:base, dir:RTL_LANGUAGES.has(base) ? 'rtl' : 'ltr'};
 }
 
-// ASCII and full-width spreadsheet formula prefixes, after optional spaces or a BOM.
-const FORMULA_PREFIX = /^[\s﻿　]*[=+\-@＝＋－＠−]/;
+// ASCII and full-width spreadsheet formula prefixes, after optional spaces, a BOM or invisible zero-width / direction controls.
+const FORMULA_PREFIX = /^[\s\uFEFF\u3000\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069]*[=+\-@＝＋－＠−]/;
 export function csvCell(value) {
   let text = String(value ?? '');
   if (FORMULA_PREFIX.test(text) || /^[\t\r\n]/.test(text)) text = `'${text}`;

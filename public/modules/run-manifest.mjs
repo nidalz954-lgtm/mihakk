@@ -219,6 +219,13 @@ export function appendRunHistory(history,manifest,{limit=RUN_HISTORY_LIMIT}={}) 
   return [...saved,entry].slice(-maximum);
 }
 
+/** Union of two histories (for example this tab and what another tab wrote), by run id, oldest first, bounded. */
+export function mergeRunHistory(first,second,{limit=RUN_HISTORY_LIMIT}={}) {
+  const maximum=historyLimit(limit);if(!Array.isArray(first)||!Array.isArray(second))throw new TypeError('History must be an array.');
+  const unique=new Map();for(const source of [...first.slice(-50),...second.slice(-50)]){const entry=safeHistoryEntry(source);if(entry)unique.set(entry.runId,entry);}
+  return [...unique.values()].sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt)).slice(-maximum);
+}
+
 export function parseRunHistory(serialized,{limit=RUN_HISTORY_LIMIT}={}) {
   const maximum=historyLimit(limit);
   if(typeof serialized!=='string'||serialized.length>MAX_HISTORY_BYTES)return [];
