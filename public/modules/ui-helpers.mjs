@@ -118,11 +118,21 @@ export function modelFailureNotice(analysis, mode, {cancelledByUser = false} = {
   const contextual = mode === 'context' || mode === 'context-multi';
   const execution = contextual ? analysis?.contextExecution : analysis?.execution;
   const error = contextual ? analysis?.contextError || execution?.error : execution?.error;
-  if (!error || cancelledByUser) return null;
   const done = Math.max(0, Math.trunc(Number(contextual ? analysis?.contextProcessedRows : analysis?.semanticProcessedRows)) || 0);
   const eligible = Math.max(done, Math.trunc(Number(contextual ? analysis?.contextEligibleRows : analysis?.semanticEligibleRows)) || 0);
-  const retained = done ? `حُفظت ${countFormat.format(done)} من ${countFormat.format(eligible)} مقارنة مكتملة؛ ${done < eligible ? 'الباقي بلا تحليل بالنموذج.' : 'وصلت نتائج لكل الأزواج المؤهلة، لكن التشغيل أبلغ عن فشل.'}` : 'لم تكتمل أي مقارنة بالنموذج.';
-  return `تعذّر استكمال ${contextual ? 'المؤشر السياقي' : 'نموذج التشابه'}: ${withoutFinalStop(error)}. ${retained} نتائج الفحص البنيوي واللفظي متاحة.`;
+  // A record that says "not completed" (or fewer finished pairs than eligible ones) is an incomplete run even when no error text came with it.
+  const incomplete = execution?.completed === false || (contextual && analysis?.contextCompleted === false) || done < eligible;
+  if ((!error && !incomplete) || cancelledByUser) return null;
+  const name = contextual ? 'المؤشر السياقي' : 'نموذج التشابه';
+  const retained = done ? `حُفظت ${countFormat.format(done)} من ${countFormat.format(eligible)} مقارنة مكتملة؛ ${done < eligible ? 'الباقي بلا تحليل بالنموذج.' : error ? 'وصلت نتائج لكل الأزواج المؤهلة، لكن التشغيل أبلغ عن فشل.' : 'وصلت نتائج لكل الأزواج المؤهلة، لكن سجل التنفيذ يصرّح بأنه غير مكتمل.'}` : 'لم تكتمل أي مقارنة بالنموذج.';
+  const lead = error ? `تعذّر استكمال ${name}: ${withoutFinalStop(plainModelError(error))}.` : `لم يكتمل ${name}.`;
+  return `${lead} ${retained} نتائج الفحص البنيوي واللفظي متاحة.`;
+}
+
+/** Model errors reach the person in Arabic; an English runtime message (or any text without Arabic letters) becomes a generic sentence. */
+export function plainModelError(message) {
+  const text = String(message ?? '').trim();
+  return /[؀-ۿ]/.test(text) ? text : 'تعذّر تشغيل النموذج في هذا المتصفح';
 }
 
 /** Title for findings whose fixed label would contradict their evidence; null means use the standard label. */
@@ -142,6 +152,23 @@ export function normalizeSearchText(value) {
     .replace(/[\u06F0-\u06F9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))
     .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
     .toLocaleLowerCase();
+}
+
+/**
+ * Does the (normalized) case text contain the (normalized) query? A query that starts or ends with a digit matches whole numbers
+ * only: "سورة 2" must not return surah 20-29 and "صف 1" must not return rows 10-19, while "112:3" and free text work as before.
+ */
+export function searchMatches(haystack, query) {
+  const text = String(haystack ?? ''), needle = String(query ?? '');
+  if (!needle) return true;
+  const startsWithDigit = /^\d/.test(needle), endsWithDigit = /\d$/.test(needle);
+  if (!startsWithDigit && !endsWithDigit) return text.includes(needle);
+  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+    if (startsWithDigit && /\d/.test(text[at - 1] ?? '')) continue;
+    if (endsWithDigit && /\d/.test(text[at + needle.length] ?? '')) continue;
+    return true;
+  }
+  return false;
 }
 
 /** Everything a reviewer can see about a case: title, location label, surah number, row number, ids and the highlighted words. */

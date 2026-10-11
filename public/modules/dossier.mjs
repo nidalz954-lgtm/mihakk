@@ -1,4 +1,4 @@
-import {arabicCount} from './ui-helpers.mjs';
+import {arabicCount, languageLimitsNotice, withoutFinalStop} from './ui-helpers.mjs';
 import {knownAttribution} from './trust-protocol.mjs';
 
 /** Cases the reviewer must settle: structural and text-comparison signals. Evidence-state signals are context, not cases. */
@@ -66,7 +66,7 @@ function aiGate(ai) {
     partial:['hold',`لم يكتمل ${name}: ${counted} فقط. المواضع الباقية بلا تحليل؛ أعد التشغيل أو أفصح عن الامتناع.`],
     inconsistent:['hold',`عدادات ${name} تسجل ${counted}، لكن حالة التنفيذ تصرح بأنه غير مكتمل. راجع سجل التنفيذ أو أعد التشغيل قبل الاعتماد على النتيجة.`],
     cancelled:['hold',`أُوقف ${name} عند ${counted}. المواضع الباقية لم تُحلل؛ أعد التشغيل أو أفصح عن الامتناع.`],
-    failed:['hold',`تعذّر إكمال ${name} (${counted})${ai.error ? `: ${ai.error}` : ''}. لا تعامل غياب الإشارات كنتيجة.`],
+    failed:['hold',`تعذّر إكمال ${name} (${counted})${ai.error ? `: ${withoutFinalStop(ai.error)}` : ''}. لا تعامل غياب الإشارات كنتيجة.`],
     not_run:['hold',`طُلب ${name} ولم يُشغّل: ${ai.error}`],
   }[ai.state];
   return {id:'ai_execution',label:'تنفيذ التحليل الذكي الاختياري',status:gate[0],state:ai.state,detail:gate[1]};
@@ -88,14 +88,16 @@ export function buildReviewDossier(report, decisions = {}, {revisionReview = nul
   const sourceCoverage = report.rows.filter(r => r.verseId && !r.findings.some(f => ['empty_translation','duplicate_verse','out_of_scope'].includes(f.code)) && !r.reference).length;
   const languageAbstentions = report.rows.filter(r => r.comparisonReason === 'language_mismatch').length;
   const ai = aiExecutionState(report);
+  // Rows whose text differs but whose meaning checks do not exist for the candidate language abstain: they are neither "covered" nor "resolved" (V4).
+  const limits = languageLimitsNotice(report.summary?.languageLimits);
   const gates = [
     {id:'scope',label:'نطاق الفحص المعلن',status:report.scope?.type === 'provided' ? 'limited' : 'recorded',detail:report.scope?.type === 'provided' ? 'هذه عينة جزئية؛ لا يثبت التقرير اكتمال سورة أو القرآن.' : 'اكتمال المعرّفات يُقاس داخل النطاق المعلن فقط.'},
     {id:'structure',label:'سلامة بنية الملف ونظافة النص (أرقام وتكرار وترتيب وشوائب)',status:report.summary?.structuralFindingCount ? 'hold' : 'passed',detail:report.summary?.structuralFindingCount ? 'أصلح العيوب البنيوية في الملف ثم أعد رفعه وفحصه؛ تسجيل قرار لا يصلح النص.' : 'لم ترصد قواعد البنية خللًا داخل النطاق؛ لا يثبت هذا سلامة المعنى.'},
     {id:'source_identity',label:'هوية المصدر والطبعة والحقوق',status:identityRecorded ? 'recorded' : 'hold',detail:unknownEdition ? 'طبعة المرجع غير معلنة أو غير موثّقة. أضف دليل الطبعة قبل الاعتماد البشري.' : identityRecorded ? 'بيانات الكتاب والمؤلف والناشر مسجلة؛ لم نعتمد نسبتها علميًا.' : 'أكمل بيانات الكتاب والمؤلف أو المترجم والناشر والحقوق قبل الاعتماد البشري.'},
     {id:'source_authentication',label:'التحقق المستقل من هوية المرجع',status:'required',detail:'يوثق الجلب الحي وصول النص من المزود. يجب على المختص التحقق من هوية المؤلف والطبعة؛ لا تصادق بصمة الملف أو إقرار المستخدم على ذلك.'},
-    {id:'source_coverage',label:'تغطية الدليل',status:sourceCoverage || languageAbstentions ? 'hold' : 'recorded',detail:languageAbstentions ? `${languageAbstentions} صف له نص مرجعي لكن المقارنة ممتنعة بسبب اختلاف اللغة. ${sourceCoverage} صف بلا نص مقابل؛ الفحص البنيوي لا يثبت إجراء مقارنة.` : sourceCoverage ? `${sourceCoverage} صف بلا نص مرجعي مقابل؛ يجب توفير الدليل أو الإفصاح عن الامتناع.` : 'نصوص المقارنة المقابلة متاحة للصفوف المؤهلة؛ توافرها لا يثبت صحة المعنى.'},
+    {id:'source_coverage',label:'تغطية الدليل',status:sourceCoverage || languageAbstentions ? 'hold' : limits ? 'limited' : 'recorded',detail:`${languageAbstentions ? `${languageAbstentions} صف له نص مرجعي لكن المقارنة ممتنعة بسبب اختلاف اللغة. ${sourceCoverage} صف بلا نص مقابل؛ الفحص البنيوي لا يثبت إجراء مقارنة.` : sourceCoverage ? `${sourceCoverage} صف بلا نص مرجعي مقابل؛ يجب توفير الدليل أو الإفصاح عن الامتناع.` : 'نصوص المقارنة المقابلة متاحة للصفوف المؤهلة؛ توافرها لا يثبت صحة المعنى.'}${limits ? ` ${limits.long}` : ''}`},
     aiGate(ai),
-    {id:'case_resolution',label:'قرارات المراجعة',status:unresolved.length ? 'hold' : 'recorded',detail:`${arabicCount(unresolved.length,{one:'حالة غير محسومة',two:'حالتان غير محسومتان',few:'حالات غير محسومة',other:'حالة غير محسومة'})}: ${referred.length} إحالة لم تُغلق والباقي بلا قرار. المحسوم هو قرار «تحتاج تصحيحاً» أو «إغلاق التنبيه» مع سبب.`},
+    {id:'case_resolution',label:'قرارات المراجعة',status:unresolved.length ? 'hold' : limits ? 'limited' : 'recorded',detail:`${arabicCount(unresolved.length,{one:'حالة غير محسومة',two:'حالتان غير محسومتان',few:'حالات غير محسومة',other:'حالة غير محسومة'})}: ${referred.length} إحالة لم تُغلق والباقي بلا قرار. المحسوم هو قرار «تحتاج تصحيحاً» أو «إغلاق التنبيه» مع سبب.${limits ? ` هذا العدد لا يشمل الصفوف الممتنعة بسبب لغة الترجمة. ${limits.long}` : ''}`},
     {id:'corrections',label:'التصحيحات وإعادة الفحص',status:accepted.length ? 'hold' : 'recorded',detail:accepted.length ? `${arabicCount(accepted.length,{one:'إشارة',two:'إشارتان',few:'إشارات',other:'إشارة'})} قبلها المراجع وتحتاج تصحيحًا في الملف وإعادة فحص؛ لا يعني قبول الإشارة قبول الترجمة.` : 'لا توجد إشارة مقبولة تستدعي إصلاحًا مسجلًا في هذه الجولة.'},
     {id:'expert_signoff',label:'اعتماد المختص خارج الأداة',status:'required',detail:'لا يصدر مِحَكّ اعتمادًا علميًا أو إذن نشر. يتولى المختص والناشر ذلك وفق إجراءاتهم.'},
   ];
@@ -118,5 +120,5 @@ export function buildReviewDossier(report, decisions = {}, {revisionReview = nul
     const detail=team.role!=='manager'?'هذا ملف عمل ضمن فريق. الدمج وملف المتابعة النهائي عند المدير.':approved<total?`${approved} من ${total} حالة وافق عليها مشرف. غير موزعة ${Number(stages.unassigned)||0}، عند المدققين ${Number(stages.assigned)||0}، بانتظار المشرف ${Number(stages.submitted)||0}، مُعادة ${Number(stages.returned)||0}.`:'وافق مشرف على كل الحالات داخل الفريق. الأسماء يكتبها أصحابها، وموافقة المشرف مراجعة داخلية وليست إذن نشر.';
     gates.splice(-1,0,{id:'team_oversight',label:'موافقة المشرفين داخل الفريق',status,detail});
   }
-  return {schemaVersion:'mihakk-review-dossier/1',createdAt:new Date().toISOString(),candidate,scope:report.scope,reference,...(team?{team:{role:team.role,total:Number(team.total)||0,stages:team.stages??{}}}:{}),counts:{cases:inspectionCases.length,unresolved:unresolved.length,referred:referred.length,acceptedSignals:accepted.length,modelAbstentions:ai.abstentions,resolved:inspectionCases.length-unresolved.length},aiExecution:ai,gates,status:gates.some(g=>g.status==='hold')?'needs_work':'ready_for_expert_review',publicationAuthorized:false,certificate:false,synthetic:candidate.synthetic === true,claim:'مخرج متابعة للمراجعة؛ ليس شهادة صحة ترجمة أو إذن نشر.'};
+  return {schemaVersion:'mihakk-review-dossier/1',createdAt:new Date().toISOString(),candidate,scope:report.scope,reference,...(team?{team:{role:team.role,total:Number(team.total)||0,stages:team.stages??{}}}:{}),counts:{cases:inspectionCases.length,unresolved:unresolved.length,referred:referred.length,acceptedSignals:accepted.length,modelAbstentions:ai.abstentions,resolved:inspectionCases.length-unresolved.length,...(limits?{languageLimitedRows:limits.rows}:{})},aiExecution:ai,gates,status:gates.some(g=>g.status==='hold')?'needs_work':'ready_for_expert_review',publicationAuthorized:false,certificate:false,synthetic:candidate.synthetic === true,claim:'مخرج متابعة للمراجعة؛ ليس شهادة صحة ترجمة أو إذن نشر.'};
 }

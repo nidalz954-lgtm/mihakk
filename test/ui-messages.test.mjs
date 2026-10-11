@@ -130,7 +130,7 @@ test('BUG-20: the visible title with its shadda and Arabic-Indic digits in the q
 test('BUG-20: a spans text keeps working and app.js uses the shared helper with a per-finding cache', () => {
   const finding = { code: 'lexical_difference', message: 'm', verseIds: ['1:1'], rowNumbers: [1], spans: [{ text: 'merciful' }], evidence: {} };
   assert.ok(findingSearchText(finding, { title: 't', location: '1:1' }).includes('merciful'));
-  assert.match(app, /const matchesQuery=!query\|\|searchTextOf\(f\)\.includes\(query\)/);
+  assert.match(app, /const matchesQuery=!query\|\|searchMatches\(searchTextOf\(f\),query\)/);
   assert.match(app, /normalizeSearchText\(\$\('findings-search'\)\.value\.trim\(\)\)/);
 });
 
@@ -247,8 +247,8 @@ test('BUG-31: trailing full stops are removed so a joined sentence never ends wi
   assert.equal(withoutFinalStop('abort. . '), 'abort');
   assert.equal(withoutFinalStop(undefined), '');
   assert.doesNotMatch(`تعذّر استكمال النموذج: ${withoutFinalStop('انتهت مهلة النموذج.')}. نتائج`, /\.\./);
-  assert.match(app, /تعذّر استكمال النموذج: \$\{withoutFinalStop\(error\.message\)\}\./);
-  assert.match(app, /state\.cancelled\?\[aiError,revisionWarning,state\.storageIssue\]/);
+  assert.match(app, /تعذّر استكمال النموذج: \$\{withoutFinalStop\(plainModelError\(error\.message\)\)\}\./);
+  assert.match(app, /runNoticeParts\(\{cancelled:state\.cancelled,referenceError,referenceWarning,aiError,revisionWarning,storageIssue:state\.storageIssue\}\)/);
   assert.doesNotMatch(app, /جارٍ حفظ المقارنات المكتملة بعد إيقاف العملية الإضافية/);
 });
 

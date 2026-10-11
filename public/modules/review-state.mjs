@@ -78,6 +78,33 @@ export function applyStoredDecisions(entries, fingerprintByFindingId) {
   return {decisions, unapplied, appliedCount:Object.keys(decisions).length, unappliedCount:Object.keys(unapplied).length};
 }
 
+/* ---- Where a saved decision was made (additive fields; decisions saved before they existed carry neither) ---- */
+const SHA256 = /^[a-f0-9]{64}$/;
+const MAX_STORED_FILE_NAME = 200;
+/** Candidate file name and SHA-256 recorded with a decision at save time; empty strings for older decisions or malformed values. */
+export function decisionOrigin(entry) {
+  const sha256 = typeof entry?.candidateSha256 === 'string' && SHA256.test(entry.candidateSha256) ? entry.candidateSha256 : '';
+  const fileName = typeof entry?.candidateFileName === 'string' ? entry.candidateFileName.slice(0, MAX_STORED_FILE_NAME) : '';
+  return {sha256, fileName};
+}
+/** The decision as it is saved: the choice, the reason, the time, and the candidate file it was made on (name and SHA-256). */
+export function stampSavedDecision({decision, note, savedAt}, candidate) {
+  const sha256 = typeof candidate?.sha256 === 'string' && SHA256.test(candidate.sha256) ? candidate.sha256 : '';
+  return {decision, note, savedAt, ...(sha256 ? {candidateFileName: String(candidate?.fileName ?? '').slice(0, MAX_STORED_FILE_NAME), candidateSha256: sha256} : {})};
+}
+/**
+ * True when the decision was saved on a candidate file whose content (SHA-256) differs from the one open now.
+ * An older decision without a recorded hash is never claimed to differ: its origin is unknown, not different.
+ */
+export function isFromDifferentFileContent(entry, currentCandidateSha256) {
+  const {sha256} = decisionOrigin(entry);
+  return Boolean(sha256) && SHA256.test(String(currentCandidateSha256 ?? '')) && sha256 !== currentCandidateSha256;
+}
+/** How many of the applied decisions were saved on a file with different content. */
+export function countDecisionsFromDifferentFile(decisions, currentCandidateSha256) {
+  return Object.values(decisions ?? {}).filter(entry => isFromDifferentFileContent(entry, currentCandidateSha256)).length;
+}
+
 /** What to write back: every current decision plus the bounded pile of earlier, unapplied ones. */
 export function buildDecisionStore(decisions, fingerprintByFindingId, unapplied = {}, {limit = MAX_KEPT_UNAPPLIED_DECISIONS} = {}) {
   const current = {};
@@ -172,25 +199,57 @@ export const STORAGE_UNAVAILABLE_NOTE = 'التخزين المحلي غير مت
 export const STORE_REPAIRED_NOTE = 'كان مخزن القرارات المحلي لهذه المراجعة تالفًا فأُعيد إنشاؤه؛ لم يمكن قراءة ما كان فيه.';
 
 /** The case dialog must distinguish a saved decision from one held only in this page. */
-export function savedDecisionNotice({draft, saved, storageFailed = false, storageIssue = ''} = {}) {
-  if (draft) return 'استُعيدت مسودتك التي لم تُحفظ؛ اضغط «حفظ القرار» لتثبيتها.';
+export function savedDecisionNotice({draft, saved, storageFailed = false, storageIssue = '', carried = false, fileName = ''} = {}) {
+  // A decision whose evidence matched but which was made on a file with different content says so, in the case window too (V3).
+  const origin = saved && carried ? `${FROM_DIFFERENT_FILE_LABEL}${fileName ? ` («\u2068${fileName}\u2069»)` : ''}. ` : '';
+  const advice = saved && carried ? ' راجع الحالة ثم اضغط «حفظ القرار» لتثبيته على هذا الملف.' : '';
+  if (draft) return `${origin}استُعيدت مسودتك التي لم تُحفظ؛ اضغط «حفظ القرار» لتثبيتها.`;
   if (!saved) return '';
-  return storageFailed || storageIssue === STORAGE_UNAVAILABLE_NOTE
+  return origin + (storageFailed || storageIssue === STORAGE_UNAVAILABLE_NOTE
     ? 'القرار محفوظ لهذه الجلسة فقط؛ التخزين المحلي غير متاح. نزّل التقرير قبل إغلاق الصفحة.'
-    : 'قرارك محفوظ في هذا المتصفح.';
+    : 'قرارك محفوظ في هذا المتصفح.') + advice;
+}
+
+/** Badge text and note for decisions that were saved on a candidate file with different content (V3). */
+export const FROM_DIFFERENT_FILE_LABEL = 'قرار من نسخة أخرى من الملف';
+export function differentFileDecisionsNote(count) {
+  return count > 0 ? `قرارات مطبّقة من نسخة أخرى من الملف: ${arabicNumber(count)}. طُبّقت لأن دليل كل حالة منها لم يتغير، لكنها لم تُراجع على هذا الملف. افتح الحالة وأعد حفظ قرارك لتثبيته عليه.` : '';
 }
 
 /** "N من M محسومة" for the results step; the figures come from caseProgress, the same helper the dossier counts use. */
-export function decisionProgressText(progress) {
-  if (!progress?.cases) return 'لا توجد حالات فحص (بنيوية أو مقارنة) تحتاج حسماً.';
+export function decisionProgressText(progress, {languageLimitedRows = 0} = {}) {
+  const limited = Math.max(0, Math.trunc(Number(languageLimitedRows)) || 0);
+  // Rows that abstained because the candidate language has no meaning checks are not "no cases": say so next to the count (V4).
+  const limits = limited ? ` لا يشمل ذلك ${arabicNumber(limited)} من الصفوف التي امتنع فحص معناها بسبب لغة الترجمة (انظر السطر أعلاه)؛ اقرأها بنفسك.` : '';
+  if (!progress?.cases) return limited ? `لم تظهر حالات فحص (بنيوية أو مقارنة) تحتاج حسماً، لكن هذا لا يعني أن الصفوف سليمة.${limits}` : 'لا توجد حالات فحص (بنيوية أو مقارنة) تحتاج حسماً.';
   const referred = progress.referred ? ` (منها ${arabicNumber(progress.referred)} إحالة لم تُغلق)` : '';
   const evidence = progress.evidenceSignals ? ` إشارات حالة الدليل (${arabicNumber(progress.evidenceSignals)}) لا تُعد حالات فحص.` : '';
-  return `القرارات: ${arabicNumber(progress.resolved)} من ${arabicNumber(progress.cases)} محسومة · ${arabicNumber(progress.unresolved)} غير محسومة${referred}. المحسوم هو «تحتاج تصحيحاً» أو «إغلاق التنبيه» مع سبب.${evidence}`;
+  return `القرارات: ${arabicNumber(progress.resolved)} من ${arabicNumber(progress.cases)} محسومة · ${arabicNumber(progress.unresolved)} غير محسومة${referred}. المحسوم هو «تحتاج تصحيحاً» أو «إغلاق التنبيه» مع سبب.${evidence}${limits}`;
 }
 
 /** Caption under the signals metric card: the same unresolved count as the dossier. */
-export function decisionMetricCaption(progress) {
-  return progress?.cases ? `غير محسومة: ${arabicNumber(progress.unresolved)} من ${arabicNumber(progress.cases)} حالة فحص` : 'لا حالات فحص تحتاج حسماً';
+export function decisionMetricCaption(progress, {languageLimitedRows = 0} = {}) {
+  const limited = Number(languageLimitedRows) > 0;
+  if (progress?.cases) return `غير محسومة: ${arabicNumber(progress.unresolved)} من ${arabicNumber(progress.cases)} حالة فحص${limited ? ' · وصفوف ممتنعة بسبب اللغة' : ''}`;
+  return limited ? 'لا حالات فحص ظهرت · صفوف ممتنعة بسبب اللغة' : 'لا حالات فحص تحتاج حسماً';
+}
+
+/**
+ * A reason typed before a withdrawal stays in the box while the dialog is open; once the dialog closes it is not an
+ * "unsaved draft" (V3). A new choice, or a changed reason, still is.
+ */
+export function hasUnsavedDraft({note = '', draftDecision = null, saved = null, withdrawnNote = null} = {}) {
+  const text = String(note ?? '').trim();
+  const sameAsWithdrawn = withdrawnNote != null && text === withdrawnNote && !draftDecision;
+  return (Boolean(text) && text !== (saved?.note || '') && !sameAsWithdrawn) || (Boolean(draftDecision) && draftDecision !== saved?.decision);
+}
+
+/**
+ * The sentences of the end-of-run notice. A stopped run drops reference and fetch messages that no longer describe what the
+ * user stopped, but never the storage warning: decisions made afterwards still will not survive closing the page.
+ */
+export function runNoticeParts({cancelled = false, referenceError = '', referenceWarning = '', aiError = '', revisionWarning = '', storageIssue = ''} = {}) {
+  return (cancelled ? [aiError, revisionWarning, storageIssue] : [referenceError, referenceWarning, aiError, revisionWarning, storageIssue]).filter(Boolean);
 }
 
 /** Shown when earlier saved decisions exist whose evidence is not in this run. */
