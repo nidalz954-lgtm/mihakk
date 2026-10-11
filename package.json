@@ -1,6 +1,6 @@
 {
   "name": "mihakk-mvp",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "type": "module",
   "description": "Browser-local pre-publication translation review with traceable sources and experimental contextual AI; no religious certification.",

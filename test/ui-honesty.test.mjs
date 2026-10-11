@@ -320,3 +320,18 @@ test('P1-08: the missing-verse box shows one error line and one retry; the mark 
   assert.match(box, /box\.querySelector\('\.quran-error-line'\)\?\.remove\(\)/, 'a retry clears the line');
   assert.match(app, /\[\.\.\.\$\('detail-content'\)\.querySelectorAll\('mark'\)\]\.some\(mark=>mark\.textContent\.trim\(\)\)/);
 });
+
+// ---- dossier gate banner: never a green check for a language-limited run ----
+import {dossierGateView} from '../public/modules/ui-helpers.mjs';
+test('dossierGateView keeps the old banners and never shows a green check when rows abstained for language limits', async () => {
+  assert.deepEqual(dossierGateView({ready: true, limitedRows: 0}), {className: 'publication-gate ready', icon: '✓', heading: 'اكتملت المتابعة المسجلة؛ أحله للمراجعة العلمية النهائية'});
+  assert.equal(dossierGateView({ready: false}).heading, 'هناك عوائق أو بيانات تحتاج استكمالاً قبل الإحالة');
+  assert.equal(dossierGateView({demo: true, ready: true, limitedRows: 5}).className, 'publication-gate demo');
+  const limited = dossierGateView({ready: true, limitedRows: 4});
+  assert.equal(limited.className, 'publication-gate');
+  assert.equal(limited.icon, '!');
+  assert.match(limited.heading, /حدود لغوية/);
+  assert.doesNotMatch(limited.heading, /^اكتملت المتابعة المسجلة؛ أحله/);
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(source, /dossierGateView\(\{demo:state\.demo,ready:status\.ready,limitedRows:Number\(report\.summary\?\.languageLimits\?\.rowsLimited\)\|\|0\}\)/);
+});

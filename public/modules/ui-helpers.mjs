@@ -279,3 +279,11 @@ export function nonTextCellNote(receivedType) {
   const types = {number: 'رقم', boolean: 'قيمة منطقية', object: 'كائن أو قائمة', bigint: 'رقم كبير', symbol: 'رمز', function: 'دالة'};
   return `خلية الترجمة ليست نصًا: النوع المستلم «${types[receivedType] || receivedType || 'غير معروف'}»، ولم يُحوَّل إلى نص.`;
 }
+
+/** What the dossier gate banner shows. A recorded follow-up is never shown as a green check when rows abstained for language limits. */
+export function dossierGateView({demo = false, ready = false, limitedRows = 0} = {}) {
+  if (demo) return {className: 'publication-gate demo', icon: '▷', heading: 'مثال تشغيل — ليس ملفاً قابلاً للنشر'};
+  if (ready && Number(limitedRows) > 0) return {className: 'publication-gate', icon: '!', heading: 'المتابعة المسجلة مكتملة مع حدود لغوية؛ لم تُفحص معاني الصفوف الممتنعة بسبب اللغة'};
+  if (ready) return {className: 'publication-gate ready', icon: '✓', heading: 'اكتملت المتابعة المسجلة؛ أحله للمراجعة العلمية النهائية'};
+  return {className: 'publication-gate', icon: '!', heading: 'هناك عوائق أو بيانات تحتاج استكمالاً قبل الإحالة'};
+}

@@ -24,7 +24,7 @@ let revisionWorkspace=null,teamWorkspace=null;
 Object.assign(state,{drafts:{},withdrawnNotes:{},unappliedDecisions:{},unappliedCount:0,legacyDecisionKey:'',storageIssue:'',storageFailed:false,resetDeclined:false});
 /** Decisions that count for this viewer: own ones alone, supervisor-approved ones for a team manager. */
 const currentDecisions=()=>teamWorkspace?teamWorkspace.effectiveDecisions(state.decisions):state.decisions;
-import { languageLimitsNotice, findingTitleOverride, normalizeSearchText, searchMatches, findingSearchText, rowlessFindingsText, displayFileName, withoutFinalStop, stopMessage, unverifiedEmbeddingNote, checklistStatusWord, missingVersePreview, nonTextCellNote, referenceDefects, referenceDefectLines, createOperationProgress, modelFailureNotice, plainModelError } from './modules/ui-helpers.mjs';
+import { languageLimitsNotice, findingTitleOverride, normalizeSearchText, searchMatches, findingSearchText, rowlessFindingsText, displayFileName, withoutFinalStop, stopMessage, unverifiedEmbeddingNote, checklistStatusWord, missingVersePreview, nonTextCellNote, referenceDefects, referenceDefectLines, createOperationProgress, modelFailureNotice, plainModelError, dossierGateView } from './modules/ui-helpers.mjs';
 import { strictInteger, isValidVerseId } from './modules/quran-index.mjs';
 const PAGE_SIZE = 12;
 const ROWS={zero:'صف',one:'صف',two:'صف',few:'صفوف',many:'صفًا',other:'صف'};
@@ -343,8 +343,8 @@ function publicationState(){
 }
 function renderDossier(){
   if(!state.report)return;const report=state.report,status=publicationState(),source=report.provenance.reference;
-  const gate=$('publication-gate');gate.replaceChildren();gate.className=`publication-gate${state.demo?' demo':status.ready?' ready':''}`;append(gate,'span',state.demo?'▷':status.ready?'✓':'!','gate-icon').setAttribute('aria-hidden','true');const copy=append(gate,'div');
-  append(copy,'h2',state.demo?'مثال تشغيل — ليس ملفاً قابلاً للنشر':status.ready?'اكتملت المتابعة المسجلة؛ أحله للمراجعة العلمية النهائية':'هناك عوائق أو بيانات تحتاج استكمالاً قبل الإحالة');
+  const gate=$('publication-gate');gate.replaceChildren();const gateView=dossierGateView({demo:state.demo,ready:status.ready,limitedRows:Number(report.summary?.languageLimits?.rowsLimited)||0});gate.className=gateView.className;append(gate,'span',gateView.icon,'gate-icon').setAttribute('aria-hidden','true');const copy=append(gate,'div');
+  append(copy,'h2',gateView.heading);
   append(copy,'p',state.demo?'يعرض هذا التقرير طريقة العمل فقط. الأرقام تخص نصوصاً اصطناعية مؤلفة ولا تقيس دقة مراجعة ترجمة قرآنية.':`${arabicCount(status.counts.unresolved,{one:'حالة غير محسومة',two:'حالتان غير محسومتان',few:'حالات غير محسومة',other:'حالة غير محسومة'})}، ${arabicCount(status.counts.acceptedSignals,{one:'إشارة',two:'إشارتان',few:'إشارات',other:'إشارة'})} تحتاج تصحيحاً وإعادة فحص.${limitsShort(report.summary)?` ${limitsShort(report.summary).replace(/^ · /,'')}.`:''} هذا ملف متابعة للمختص، وليس شهادة صحة أو إذن نشر.`);
   $('dossier-checklist').replaceChildren();
   for(const check of status.gates){const good=['recorded','passed'].includes(check.status);const row=append($('dossier-checklist'),'div',null,`checklist-item${good?' good':''}`);row.setAttribute('role','listitem');append(row,'span',good?'✓':check.status==='hold'?'!':'○').setAttribute('aria-hidden','true');const text=append(row,'div');text.append(srOnly(`${checklistStatusWord(check.status)}: `));append(text,'strong',check.label);append(text,'small',check.detail);}
