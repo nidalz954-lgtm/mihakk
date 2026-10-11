@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { createStaticHandler, CSP } from '../src/static-app.mjs';
 
-// BUG-37: the ONNX Runtime files of the NLI/E5 paths are served by this site, byte-pinned, instead of being fetched from a CDN without SRI.
+// BUG-37 / P2-05: the ONNX Runtime files of all three model workers (NLI, E5 and the on-device listening one) are served by this site,
+// byte-pinned, instead of being fetched from a CDN without SRI. With no worker left on a CDN, the CSP names no CDN host.
 // The pins equal the SHA-256 list that jsDelivr publishes for @huggingface/transformers@3.8.1 (dist/ort-wasm-simd-threaded.jsep.*).
 const PINS = {
   'ort-wasm-simd-threaded.jsep.mjs': { sha256: '08fb86ec433c78bfb032c5d84a68b8e8e5a8d81268fa39e24314179a5767a5b9', bytes: 44484 },
@@ -25,19 +26,21 @@ test('BUG-37 the self-hosted ONNX Runtime files are byte-identical to the pinned
   assert.ok(total < 40 * 1048576, `the self-hosted runtime stays below 40 MB (is ${(total / 1048576).toFixed(1)} MB)`);
 });
 
-test('BUG-37 the context and E5 workers load the runtime from their own site; no CDN host remains in them', async () => {
-  for (const name of ['context-risk-worker.mjs', 'semantic-worker.mjs']) {
+test('BUG-37 the context, E5 and on-device listening workers load the runtime from their own site; no CDN host remains in them', async () => {
+  for (const name of ['context-risk-worker.mjs', 'semantic-worker.mjs', 'speech-worker.mjs']) {
     const source = await readFile(new URL(name, MODULES), 'utf8');
     assert.match(source, /wasmPaths = new URL\('\.\.\/vendor\/ort\/', import\.meta\.url\)\.href/, name);
     assert.doesNotMatch(source, /jsdelivr/i, name);
   }
 });
 
-test('BUG-37 the CSP keeps jsDelivr exactly as long as some worker (the on-device listening one) still loads from it', async () => {
-  const names = ['context-risk-worker.mjs', 'semantic-worker.mjs', 'speech-worker.mjs'];
-  const stillUsesCdn = (await Promise.all(names.map(async (name) => /jsdelivr/i.test(await readFile(new URL(name, MODULES), 'utf8'))))).some(Boolean);
-  assert.equal(CSP.includes('https://cdn.jsdelivr.net'), stillUsesCdn);
-  assert.match(CSP, /script-src 'self' 'wasm-unsafe-eval'/, 'the local WASM still compiles under the same policy');
+test('P2-05 no module, page or policy names jsDelivr any more: the CSP lists no CDN host', async () => {
+  const names = (await readdir(MODULES)).filter((name) => name.endsWith('.mjs'));
+  for (const name of names) assert.doesNotMatch(await readFile(new URL(name, MODULES), 'utf8'), /jsdelivr/i, name);
+  for (const page of ['../public/app.js', '../public/index.html', '../public/model-check.html']) assert.doesNotMatch(await readFile(new URL(page, import.meta.url), 'utf8'), /jsdelivr/i, page);
+  assert.doesNotMatch(CSP, /jsdelivr/i);
+  assert.match(CSP, /script-src 'self' 'wasm-unsafe-eval';/, 'the local WASM still compiles under the same policy');
+  assert.ok(CSP.includes("connect-src 'self' https://api.quranpedia.net https://huggingface.co https://*.huggingface.co https://*.hf.co;"), 'only the reference API and Hugging Face remain as outside hosts');
 });
 
 test('BUG-37 the static server delivers the runtime with usable content types and the pinned bytes', async () => {
