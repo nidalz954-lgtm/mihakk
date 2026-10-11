@@ -192,7 +192,7 @@ async function runAudit(){
         if(modelFailure)aiError=modelFailure;
       }catch(error){
         aiError=`تعذّر استكمال النموذج: ${withoutFinalStop(plainModelError(error.message))}. نتائج البنية والفروق اللفظية محفوظة.`;
-        if(!state.cancelled){/* The person reads Arabic only; the worker's raw (usually English) text is kept additively as technical details. */const shown=plainModelError(error.message),raw=String(error.technicalDetails||(shown!==String(error.message??'').trim()?error.message:'')||'').slice(0,600);report.provenance.analysis.modelError=shown;if(raw)report.provenance.analysis.modelTechnicalDetails=raw;}
+        if(!state.cancelled){/* The person reads Arabic only; the worker's raw (usually English) text is kept additively as technical details. */const shown=plainModelError(error.message),original=String(error.message??'').trim(),raw=[...new Set([error.technicalDetails,shown!==original?original:''].map(part=>String(part??'').trim()).filter(Boolean))].join(' | ').slice(0,600);report.provenance.analysis.modelError=shown;if(raw)report.provenance.analysis.modelTechnicalDetails=raw;}
       }finally{state.modelCancelled=null;}
     }
     if(state.cancelled){const done=report.provenance.analysis;aiError=stopMessage({referenceFailed:Boolean(referenceError),aiRequested:$('ai-enabled').checked,aiProcessed:done.contextProcessedRows||done.semanticProcessedRows||0,aiEligible:done.contextEligibleRows||done.semanticEligibleRows||0,lexicalCompared:report.summary.lexicalComparedRows});}
