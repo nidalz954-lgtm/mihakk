@@ -4,11 +4,11 @@ import {fileURLToPath} from 'node:url';
 const publicPath = fileURLToPath(new URL('../public/', import.meta.url));
 const {version} = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const types = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.json':'application/json','.txt':'text/plain; charset=utf-8','.csv':'text/csv; charset=utf-8','.wasm':'application/wasm','.ttf':'font/ttf','.mp4':'video/mp4','.jpg':'image/jpeg','.webp':'image/webp'};
-export const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src 'self' https://api.quranpedia.net https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+export const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.quranpedia.net https://huggingface.co https://*.huggingface.co https://*.hf.co; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
 /** Demo build only (`npm run start:demo`): adds the ElevenLabs widget (pinned on unpkg), its blob: audio worklet and its API. */
 export const DEMO_CSP = CSP
-  .replace("script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net;", "script-src 'self' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://unpkg.com/@elevenlabs/;")
-  .replace("https://cdn.jsdelivr.net; object-src", "https://cdn.jsdelivr.net https://*.elevenlabs.io wss://*.elevenlabs.io; object-src");
+  .replace("script-src 'self' 'wasm-unsafe-eval';", "script-src 'self' 'wasm-unsafe-eval' blob: https://unpkg.com/@elevenlabs/;")
+  .replace("https://*.hf.co; object-src", "https://*.hf.co https://*.elevenlabs.io wss://*.elevenlabs.io; object-src");
 export function createStaticHandler({root = publicPath, csp = CSP} = {}) {
   return async (request, response) => {
     response.setHeader('Content-Security-Policy', csp);

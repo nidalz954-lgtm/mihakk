@@ -61,7 +61,7 @@ async function execute({id, action, payload}) {
   } catch (error) {
     // Raw runtime text (often English) stays in technicalDetails; the notice is simple Arabic.
     const described = describeModelError(guard.failure ?? resumable.failure ?? error);
-    postMessage({id, event: 'error', errorKind: described.kind, technicalDetails: described.technicalDetails, message: `لم يكتمل الذكاء الاصطناعي: ${described.message}. لا تُعد النتائج البنيوية تحليلًا ذكيًا.`});
+    postMessage({id, event: 'error', errorKind: described.kind, technicalDetails: described.technicalDetails, weightIntegrity: guard.summary(pin), message: `لم يكتمل الذكاء الاصطناعي: ${described.message}. لا تُعد النتائج البنيوية تحليلًا ذكيًا.`});
   }
 }
 onmessage = ({data}) => { queue = queue.then(() => execute(data)); };
