@@ -240,6 +240,13 @@ test('P1-02: the dossier model gate prints a failure reason with a single full s
   assert.match(gate.detail, /تعذّر تنزيل ملفات النموذج\. لا تعامل غياب الإشارات/);
 });
 
+test('P1-02: the context branch reports an incomplete run too (no error text, fewer pairs than eligible, flagged not completed)', () => {
+  const notice = modelFailureNotice({contextProcessedRows: 7, contextEligibleRows: 9, contextCompleted: false, contextError: null, contextExecution: {actualInference: true, completed: false}}, 'context');
+  assert.match(notice, /^لم يكتمل المؤشر السياقي\. حُفظت (7|٧) من (9|٩) مقارنة مكتملة؛ الباقي بلا تحليل بالنموذج\. /);
+  assert.match(modelFailureNotice({contextProcessedRows: 3, contextEligibleRows: 9, contextError: 'RuntimeError: x', contextExecution: {completed: false}}, 'context-multi'), /^تعذّر استكمال المؤشر السياقي: تعذّر تشغيل النموذج في هذا المتصفح\./);
+  assert.equal(modelFailureNotice({contextProcessedRows: 9, contextEligibleRows: 9, contextCompleted: true, contextExecution: {completed: true}}, 'context'), null);
+});
+
 // ---- P1-07: progress, messages, hints ---------------------------------------------------------------------------------------
 
 test('P1-07: a download-then-inference event stream never moves the visible bar backwards and shows every worker message', () => {
