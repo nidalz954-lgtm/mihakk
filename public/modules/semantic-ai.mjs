@@ -24,6 +24,8 @@ function ensureWorker() {
       const error = new Error(data.message);
       error.partialResults = [...job.partial.values()];
       if (typeof data.technicalDetails === 'string' && data.technicalDetails) error.technicalDetails = data.technicalDetails.slice(0, 600);
+      // What the worker saw of the weight file (a refusal included). Re-derived against the pin here: "verified" only when the hashes are equal.
+      if (data.weightIntegrity && typeof data.weightIntegrity === 'object') error.weightIntegrity = normalizeWeightIntegrity(EMBEDDING_WEIGHT.sha256, data.weightIntegrity);
       // A failed worker is not kept alive (memory); the next run starts a clean one.
       if (!pending.size) { worker?.terminate(); worker = undefined; ready = false; }
       job.reject(error);
@@ -93,17 +95,22 @@ export function appendSemanticResults(report, results, execution = {}) {
   enriched.summary = {...enriched.summary, findingsCount: enriched.findings.length, comparisonFindingCount: enriched.findings.filter(f => f.type === 'comparison').length, needsReviewRows: enriched.rows.filter(r => r.status === 'needs_review').length, noSignalRows: enriched.rows.filter(r => r.status === 'no_signal').length, abstainRows: enriched.rows.filter(r => r.status === 'abstain').length, ...(enriched.summary.languageLimits ? {languageLimits: {...enriched.summary.languageLimits, rowsAbstained: enriched.rows.filter(r => r.status === 'abstain' && r.languageReview?.state === 'abstain').length}} : {}), semanticProcessedRows: processed, semanticEligibleRows: eligible};
   return enriched;
 }
+// A run that fails with no finished pair still rejects, and app.js shows the notice. The weight-integrity record is written onto the
+// report that was passed in (the same object app.js writes modelError to), so the saved report says what happened to the weight file.
+function recordWeightIntegrity(report, error) {
+  if (error?.weightIntegrity && report?.provenance?.analysis) report.provenance.analysis.embeddingWeightIntegrity = error.weightIntegrity;
+}
 export async function enrichReportWithAI(report, onProgress) {
   const inputs = report.rows.filter(row => row.reference && row.comparisonStatus === 'compared' && row.translation !== row.reference.translation).map(row => ({key: row.key, candidate: row.translation, reference: row.reference.translation}));
   if (!inputs.length) return appendSemanticResults(report, [], {actualInference:false, completed:true, reason: 'No eligible different same-language reference pairs; no model inference.'});
-  await loadSemanticModel(onProgress);
+  try { await loadSemanticModel(onProgress); } catch (error) { recordWeightIntegrity(report, error); throw error; }
   const started = performance.now();
   let results, failure = null;
   try { results = await request('compare', {inputs}, onProgress, 3600000); }
   catch (error) {
     // Cancel/failure after some pairs finished: keep them, like the context mode does, and say honestly that the run is incomplete.
     const partial = Array.isArray(error?.partialResults) ? error.partialResults : [];
-    if (!partial.length) throw error;
+    if (!partial.length) { recordWeightIntegrity(report, error); throw error; }
     results = partial; failure = error;
   }
   const execution = {actualInference:results.length > 0, completed:!failure && results.length === inputs.length, device: 'wasm-cpu-worker', elapsedMS: Math.round(performance.now() - started), inferredAt: new Date().toISOString(), weightIntegrity: loadedWeightIntegrity};
