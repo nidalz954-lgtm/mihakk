@@ -128,7 +128,9 @@ function stripVersePrefix(body, surah, ayah) {
   return { body, removed: false };
 }
 
-function splitTranslation(html, surah, ayah) {
+// Footnote blocks always leave the text. With stripAnchors, bare note-number <sup> anchors leave it too (BUG-07);
+// attached powers and units are kept either way.
+function readBody(html, stripAnchors) {
   let body;
   let footnotes;
   let anchorsRemoved = 0;
@@ -141,7 +143,7 @@ function splitTranslation(html, surah, ayah) {
       const markup = node.outerHTML + (node.closest('a')?.outerHTML ?? '');
       const power = quantitySuperscript(node.textContent ?? '', precedingInlineText(node), markup);
       if (power) { node.replaceWith(doc.createTextNode(power)); powersPreserved += 1; }
-      else if (NOTE_ANCHOR.test(node.textContent ?? "")) { node.remove(); anchorsRemoved += 1; }
+      else if (stripAnchors && NOTE_ANCHOR.test(node.textContent ?? "")) { node.remove(); anchorsRemoved += 1; }
     });
     body = plainFromHtml(doc.body.innerHTML);
   } else {
@@ -156,16 +158,35 @@ function splitTranslation(html, surah, ayah) {
       const text = plainFromHtml(inner);
       const power = quantitySuperscript(text, precedingInlineHtml(preceding), whole + linked);
       if (power) { powersPreserved += 1; return power; }
-      if (!NOTE_ANCHOR.test(text)) return whole;
+      if (!stripAnchors || !NOTE_ANCHOR.test(text)) return whole;
       anchorsRemoved += 1;
       return "";
     });
     body = plainFromHtml(body, powersPreserved > 0);
   }
+  return { body, footnotes, anchorsRemoved, powersPreserved };
+}
+
+function splitTranslation(html, surah, ayah) {
+  const read = readBody(html, true);
   // API verse numbers and note anchors are presentation markers, not verse text.
-  const prefix = stripVersePrefix(body, surah, ayah);
-  body = prefix.body.replace(/\[\d+\]/gu, () => { anchorsRemoved += 1; return ""; });
-  return { translation: normalizePlain(body), footnotes: footnotes.filter(Boolean), normalization: { versePrefixRemoved: prefix.removed, noteAnchorsRemoved: anchorsRemoved, ...(powersPreserved ? { quantitySuperscriptsPreserved: powersPreserved } : {}) } };
+  const prefix = stripVersePrefix(read.body, surah, ayah);
+  let anchorsRemoved = read.anchorsRemoved;
+  const body = prefix.body.replace(/\[\d+\]/gu, () => { anchorsRemoved += 1; return ""; });
+  let translation = normalizePlain(body);
+  let normalization = { versePrefixRemoved: prefix.removed, noteAnchorsRemoved: anchorsRemoved, ...(read.powersPreserved ? { quantitySuperscriptsPreserved: read.powersPreserved } : {}) };
+  if (!translation) {
+    // A verse whose whole text is a number or a note mark ("3.", "<sup>1</sup>", "(2:3)"): stripping would leave nothing and
+    // abort the fetch of the whole surah. Keep that verse as the source sent it and say so in its normalisation record, so
+    // nothing is invented and the comparison still sees the source's own text. A verse with no text at all still fails.
+    const unstripped = readBody(html, false);
+    const kept = normalizePlain(unstripped.body);
+    if (kept) {
+      translation = kept;
+      normalization = { versePrefixRemoved: false, noteAnchorsRemoved: 0, keptUnstrippedBecauseEmpty: true, ...(unstripped.powersPreserved ? { quantitySuperscriptsPreserved: unstripped.powersPreserved } : {}) };
+    }
+  }
+  return { translation, footnotes: read.footnotes.filter(Boolean), normalization };
 }
 
 function validInteger(value, min, max) {
@@ -306,6 +327,7 @@ export function createReferenceClient({ fetchImpl = (...args) => globalThis.fetc
         const { translation, footnotes, normalization } = splitTranslation(item.translation_text, surah, ayah);
         normalizationTotals.versePrefixRows += normalization.versePrefixRemoved ? 1 : 0;
         normalizationTotals.noteAnchorsRemoved += normalization.noteAnchorsRemoved;
+        if (normalization.keptUnstrippedBecauseEmpty) normalizationTotals.keptUnstrippedRows = (normalizationTotals.keptUnstrippedRows ?? 0) + 1;
         if (!translation) throw new ReferenceSourceError("متن الترجمة المرجعية فارغ.", "INVALID_REFERENCE_RESPONSE");
         const sha256 = await hash(translation);
         const retrievalSha256 = await hash(item.translation_text);
@@ -331,7 +353,7 @@ export function createReferenceClient({ fetchImpl = (...args) => globalThis.fetc
         verificationStatus: "verified", verificationNote: PROVENANCE_NOTE, sourceKind: "quranpedia-api", referenceKind: "quranpedia-live", publicationReady: false,
         licenseNote: "استخدام حي داخل التطبيق وفق سياسة Quranpedia؛ تبقى حقوق الترجمات لأصحابها. لا ينشر مِحَكّ corpus أو نسخة قاعدة بيانات.",
         policyURL: POLICY_URL, licenseURL: LICENSE_URL, retention: "session-memory-only", footnoteHandling: "الحواشي منفصلة عن المتن ولا تدخل حساب التشابه.",
-        normalization: { ...normalizationTotals, note: "حُذف رقم الآية من بداية النص وأرقام الحواشي قبل المقارنة حتى لا تُعد أرقامًا مختلفة؛ بصمة الرد الخام وبصمة المتن بعد المعالجة محفوظتان لكل صف." },
+        normalization: { ...normalizationTotals, note: "حُذف رقم الآية من بداية النص وأرقام الحواشي قبل المقارنة حتى لا تُعد أرقامًا مختلفة؛ بصمة الرد الخام وبصمة المتن بعد المعالجة محفوظتان لكل صف." + (normalizationTotals.keptUnstrippedRows ? ` عدد الآيات التي نصها رقم أو علامة حاشية فقط: ${normalizationTotals.keptUnstrippedRows}؛ بقي نصها كما أرسله المصدر لأن الحذف كان سيتركها فارغة، وهي معلَّمة في سجل كل صف.` : "") },
         coverageCount:resultRows.length, requestedCount:wanted.length, missingRequestedIds, skippedRows, partialCoverage:missingRequestedIds.length>0, batches
       }
     };
